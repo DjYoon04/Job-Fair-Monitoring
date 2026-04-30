@@ -278,20 +278,26 @@ function registerAuthHandlers() {
   });
 
   ipcMain.handle('auth:login', async (_, credentials) => {
+    console.log('[AUTH] Login attempt started');
     await ensureDefaultUsers();
 
     const username = normalizeUsername(credentials?.username);
     const password = String(credentials?.password || '');
 
+    console.log(`[AUTH] Username: ${username}, Password length: ${password.length}`);
+
     if (!username || !password) {
+      console.log('[AUTH] FAILED: Username or password missing');
       throw new Error('Username and password are required.');
     }
 
     const attemptState = getLoginAttemptState(username);
     if (attemptState?.lockedUntil && attemptState.lockedUntil > Date.now()) {
+      console.log('[AUTH] FAILED: Too many login attempts');
       throw new Error('Too many failed login attempts. Try again later.');
     }
 
+    console.log('[AUTH] Querying database for user...');
     const userRes = await db.query(
       `SELECT id, username, email, full_name, role, is_active, password_hash, created_at
        FROM users
@@ -300,12 +306,22 @@ function registerAuthHandlers() {
     );
 
     const user = userRes.rows[0];
+    console.log(`[AUTH] User found: ${user ? 'YES' : 'NO'}`);
+
+    if (user) {
+      console.log(`[AUTH] User active: ${user.is_active}, Hash length: ${user.password_hash.length}`);
+      const passwordMatch = verifyPassword(password, user.password_hash);
+      console.log(`[AUTH] Password match: ${passwordMatch}`);
+    }
+
     if (!user || !user.is_active || !verifyPassword(password, user.password_hash)) {
       recordFailedLogin(username);
+      console.log('[AUTH] FAILED: Invalid credentials');
       throw new Error('Invalid username or password.');
     }
 
     clearFailedLogins(username);
+    console.log('[AUTH] Creating session token...');
 
     const sessionToken = crypto.randomBytes(32).toString('hex');
     sessions.set(sessionToken, {
@@ -315,6 +331,7 @@ function registerAuthHandlers() {
       expiresAt: Date.now() + SESSION_TTL_MS,
     });
 
+    console.log('[AUTH] LOGIN SUCCESS');
     return {
       sessionToken,
       user: sanitizeUser(user),

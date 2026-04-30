@@ -53,10 +53,14 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      devTools: true,
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  // Open DevTools for debugging
+  mainWindow.webContents.openDevTools();
 
   // Build menu - hidden menu (empty array)
   const menu = Menu.buildFromTemplate([]);
@@ -72,7 +76,7 @@ function registerKeyboardShortcuts() {
   globalShortcut.register('CmdOrCtrl+R', () => {
     if (mainWindow) {
       mainWindow.reload();
-      console.log('🔄 Page refreshed (Ctrl+R)');
+      console.log('[REFRESH] Page refreshed (Ctrl+R)');
     }
   });
 
@@ -80,15 +84,15 @@ function registerKeyboardShortcuts() {
   globalShortcut.register('CmdOrCtrl+Shift+R', () => {
     if (mainWindow) {
       mainWindow.webContents.reloadIgnoringCache();
-      console.log('🔄 Hard refresh executed (Ctrl+Shift+R)');
+      console.log('[REFRESH] Hard refresh executed (Ctrl+Shift+R)');
     }
   });
 
-  console.log('⌨️  Keyboard shortcuts registered: Ctrl+R (refresh), Ctrl+Shift+R (hard refresh)');
+  console.log('[KEYBOARD] Shortcuts registered: Ctrl+R (refresh), Ctrl+Shift+R (hard refresh)');
 }
 
 app.whenReady().then(async () => {
-  console.log('✅ App ready, registering handlers...');
+  console.log('[START] App ready, registering handlers...');
 
   // Register IPC handlers AFTER app is ready
   if (!handlersRegistered) {
@@ -96,16 +100,16 @@ app.whenReady().then(async () => {
       const { registerAllHandlers } = require('./ipc/handlers');
       registerAllHandlers();
       handlersRegistered = true;
-      console.log('✅ IPC handlers registered');
+      console.log('[IPC] IPC handlers registered');
     } catch (err) {
-      console.error('❌ Error registering handlers:', err.message);
+      console.error('[ERROR] Error registering handlers:', err.message);
     }
   }
 
   // Test DB connection
   const connected = await db.testConnection();
   if (!connected) {
-    console.warn('⚠️  WARNING: Database connection failed. Check your .env configuration.');
+    console.warn('[WARNING] Database connection failed. Check your .env configuration.');
   }
 
   createWindow();

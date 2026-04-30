@@ -1901,6 +1901,14 @@ body.col-resizing {
   font-weight: 700;
 }
 
+#sumJfTable .summary-subtotal-row td {
+  background: #fff6db;
+  border-top: 1px solid #e2c979;
+  border-bottom: 1px solid #e2c979;
+  color: #6b4f00;
+  font-weight: 700;
+}
+
 /* STATUS BADGES */
 .badge {
   display: inline-block;

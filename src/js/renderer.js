@@ -1507,6 +1507,7 @@ async function exportTableToPdf(tableSelector, filename) {
       const cells = row.querySelectorAll('th, td');
       const isHeader = rowIdx === 0 || row.querySelector('th');
       const isJfSubtotalRow = row.classList.contains('jf-subtotal-row');
+      const isSummarySubtotalRow = row.classList.contains('summary-subtotal-row');
       const isJfGrandTotalRow = row.classList.contains('jf-grand-total-row');
 
       // Set row styles
@@ -1551,8 +1552,9 @@ async function exportTableToPdf(tableSelector, filename) {
           if (isJfGrandTotalRow) {
             cell.style.backgroundColor = '#dbeafe';
             cell.style.fontWeight = '700';
-          } else if (isJfSubtotalRow) {
-            cell.style.backgroundColor = '#e8f3ff';
+          } else if (isJfSubtotalRow || isSummarySubtotalRow) {
+            // Subtotal rows use yellow background
+            cell.style.backgroundColor = '#FFFACD';
             cell.style.fontWeight = '600';
           } else if (rowIdx % 2 === 0) {
             // Alternate row colors
@@ -4324,25 +4326,84 @@ async function loadSummaries() {
     const jfBody = document.getElementById('sumJfBody');
     let totalFairs = 0, totalMale = 0, totalFemale = 0, totalApp = 0, totalLand = 0, totalSea = 0, totalAg = 0;
 
-    jfBody.innerHTML = jfSummary.map(r => {
-      totalFairs += parseInt(r.num_job_fairs);
-      totalMale += parseInt(r.total_male_applicants);
-      totalFemale += parseInt(r.total_female_applicants);
-      totalApp += parseInt(r.total_applicants);
-      totalLand += parseInt(r.land_based_agencies);
-      totalSea += parseInt(r.sea_based_agencies);
-      totalAg += parseInt(r.total_participating_agencies);
-      return `<tr>
+    const jfJanJunTotals = { fairs: 0, male: 0, female: 0, app: 0, land: 0, sea: 0, ag: 0 };
+    const jfJulDecTotals = { fairs: 0, male: 0, female: 0, app: 0, land: 0, sea: 0, ag: 0 };
+
+    const buildJfSubtotalRow = (label, totals) => `
+      <tr class="summary-subtotal-row">
+        <td><strong>${label}</strong></td>
+        <td><strong>${totals.fairs}</strong></td>
+        <td><strong>${totals.male}</strong></td>
+        <td><strong>${totals.female}</strong></td>
+        <td><strong>${totals.app}</strong></td>
+        <td><strong>${totals.land}</strong></td>
+        <td><strong>${totals.sea}</strong></td>
+        <td><strong>${totals.ag}</strong></td>
+      </tr>
+    `;
+
+    const jfRows = [];
+    let jfJanJunSubtotalInserted = false;
+    let jfHasJanJunData = false;
+
+    const jfSummaryArray = Array.isArray(jfSummary) ? jfSummary : [];
+    for (const r of jfSummaryArray) {
+      const fairs = parseInt(r.num_job_fairs) || 0;
+      const male = parseInt(r.total_male_applicants) || 0;
+      const female = parseInt(r.total_female_applicants) || 0;
+      const app = parseInt(r.total_applicants) || 0;
+      const land = parseInt(r.land_based_agencies) || 0;
+      const sea = parseInt(r.sea_based_agencies) || 0;
+      const ag = parseInt(r.total_participating_agencies) || 0;
+      const month = parseInt(r.month) || 0;
+
+      totalFairs += fairs;
+      totalMale += male;
+      totalFemale += female;
+      totalApp += app;
+      totalLand += land;
+      totalSea += sea;
+      totalAg += ag;
+
+      const targetTotals = month >= 1 && month <= 6 ? jfJanJunTotals : jfJulDecTotals;
+      targetTotals.fairs += fairs;
+      targetTotals.male += male;
+      targetTotals.female += female;
+      targetTotals.app += app;
+      targetTotals.land += land;
+      targetTotals.sea += sea;
+      targetTotals.ag += ag;
+
+      if (month >= 1 && month <= 6) {
+        jfHasJanJunData = true;
+      }
+
+      jfRows.push(`<tr>
         <td>${r.month_name?.trim()}</td>
-        <td>${r.num_job_fairs}</td>
-        <td>${r.total_male_applicants}</td>
-        <td>${r.total_female_applicants}</td>
-        <td><strong>${r.total_applicants}</strong></td>
-        <td>${r.land_based_agencies}</td>
-        <td>${r.sea_based_agencies}</td>
-        <td>${r.total_participating_agencies}</td>
-      </tr>`;
-    }).join('') || `<tr><td colspan="8">No data for ${year}</td></tr>`;
+        <td>${fairs}</td>
+        <td>${male}</td>
+        <td>${female}</td>
+        <td><strong>${app}</strong></td>
+        <td>${land}</td>
+        <td>${sea}</td>
+        <td>${ag}</td>
+      </tr>`);
+
+      // Place JAN-JUN subtotal directly below June
+      if (!jfJanJunSubtotalInserted && jfHasJanJunData && (month === 6 || month > 6)) {
+        jfRows.push(buildJfSubtotalRow('SUBTOTAL (JAN-JUN)', jfJanJunTotals));
+        jfJanJunSubtotalInserted = true;
+      }
+    }
+
+    if (!jfJanJunSubtotalInserted && jfHasJanJunData) {
+      jfRows.push(buildJfSubtotalRow('SUBTOTAL (JAN-JUN)', jfJanJunTotals));
+    }
+
+    jfBody.innerHTML = jfRows.length
+      ? `${jfRows.join('')}
+         ${buildJfSubtotalRow('SUBTOTAL (JUL-DEC)', jfJulDecTotals)}`
+      : `<tr><td colspan="8">No data for ${year}</td></tr>`;
 
     document.getElementById('sumJfFoot').innerHTML = `
       <tr>
