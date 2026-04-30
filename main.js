@@ -53,14 +53,10 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      devTools: true,
     },
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-
-  // Open DevTools for debugging
-  mainWindow.webContents.openDevTools();
 
   // Build menu - hidden menu (empty array)
   const menu = Menu.buildFromTemplate([]);
