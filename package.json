@@ -1,0 +1,36 @@
+{
+  "name": "job-fair-monitoring-system",
+  "version": "1.0.0",
+  "description": "Job Fair Monitoring System - Unified tracking for JFA issuance, document compliance, job fair reports, and monitoring timelines. Replaces 4 Excel workbooks (34 sheets) with a PostgreSQL-backed Electron desktop application.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "db:create": "psql -U postgres -c \"CREATE DATABASE job_fair_monitoring;\"",
+    "db:schema": "psql -U postgres -d job_fair_monitoring -f database/schema.sql",
+    "db:seed": "node database/seed-from-excel.js",
+    "db:setup": "npm run db:create && npm run db:schema && npm run db:seed",
+    "db:reset": "psql -U postgres -c \"DROP DATABASE IF EXISTS job_fair_monitoring;\" && npm run db:setup"
+  },
+  "keywords": [
+    "job-fair",
+    "monitoring",
+    "jfa",
+    "tracking",
+    "electron",
+    "postgresql"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "electron": "^27.3.11",
+    "html2pdf.js": "^0.14.0",
+    "pg": "^8.13.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.1",
+    "electron-reload": "^2.0.0-alpha.1"
+  }
+}
