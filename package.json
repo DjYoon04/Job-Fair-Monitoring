@@ -54,7 +54,11 @@
         "nsis",
         "portable"
       ],
-      "icon": "src/img/dmw_logo.png"
+      "icon": "src/img/dmw_logo.png",
+      "certificateFile": null,
+      "certificatePassword": null,
+      "signingHashAlgorithms": ["sha256"],
+      "sign": null
     },
     "nsis": {
       "oneClick": false,
