@@ -1,7 +1,28 @@
 // database/connection.js
 // PostgreSQL connection pool using node-postgres (pg)
 const { Pool } = require('pg');
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+// Load .env from the correct location in both dev and production
+let envPath = path.join(__dirname, '..', '.env');
+
+// In packaged Electron app, check multiple locations
+if (process.resourcesPath) {
+  const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', '.env');
+  if (fs.existsSync(unpackedPath)) {
+    envPath = unpackedPath;
+  } else {
+    const resourcesPath = path.join(process.resourcesPath, '.env');
+    if (fs.existsSync(resourcesPath)) {
+      envPath = resourcesPath;
+    }
+  }
+}
+
+dotenv.config({ path: envPath });
+console.log('[DB] Loading environment from:', envPath);
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',

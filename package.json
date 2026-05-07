@@ -49,6 +49,10 @@
       "node_modules/**/*",
       ".env*"
     ],
+    "asarUnpack": [
+      ".env*",
+      "database/**/*"
+    ],
     "publish": null,
     "win": {
       "target": [
