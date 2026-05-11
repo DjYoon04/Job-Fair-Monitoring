@@ -283,7 +283,7 @@
     </div>
 
     <div class="footer-note">
-      Configuration will be saved and remembered for next launch.
+      This screen appears every launch to verify your connection before proceeding.
     </div>
   </div>
 
@@ -370,9 +370,32 @@
       }
     }
 
-    // Initialize
-    window.addEventListener('DOMContentLoaded', () => {
-      selectRole('server');
+    // Initialize — always load saved config and pre-select it,
+    // but require the user to actively confirm (or change) on every launch.
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const cfg = await window.api.getNetworkConfig();
+
+        if (cfg.role === 'client' && cfg.serverIp) {
+          // Pre-fill client form with the saved server IP
+          selectRole('client');
+          document.getElementById('serverIpInput').value = cfg.serverIp;
+          // Show a helpful note that we're re-verifying
+          const msg = document.getElementById('testMessage');
+          msg.className = 'status-message show loading';
+          msg.innerHTML = '<span class="spinner"></span>Checking saved server connection...';
+          // Auto-test so the user immediately sees if the server is reachable
+          await testConnection();
+        } else if (cfg.role === 'server') {
+          selectRole('server');
+        } else {
+          // First run — no selection yet
+          selectRole('server');
+        }
+      } catch (err) {
+        console.error('Failed to load saved config:', err);
+        selectRole('server');
+      }
     });
   </script>
 </body>

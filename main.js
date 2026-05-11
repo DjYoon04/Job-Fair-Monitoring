@@ -50,15 +50,15 @@ let currentRole      = null;   // 'server' | 'client'
 // ─── window helpers ──────────────────────────────────────────────────────────
 
 function createWindow() {
-  const cfg = netCfg.read();
-  const needsSetup = !cfg.role || (cfg.role === 'client' && !cfg.serverIp);
-
+  // Always show the network setup screen on every launch.
+  // The setup screen itself handles connectivity verification before
+  // proceeding, so we never land in the main app with a stale/dead config.
   mainWindow = new BrowserWindow({
-    width:    needsSetup ? 600  : 1400,
-    height:   needsSetup ? 620  : 900,
-    minWidth: needsSetup ? 520  : 1100,
-    minHeight:needsSetup ? 560  : 700,
-    resizable:needsSetup ? false: true,
+    width:     600,
+    height:    620,
+    minWidth:  520,
+    minHeight: 560,
+    resizable: false,
     title: 'Job Fair Monitoring System',
     icon: path.join(__dirname, 'src', 'img', 'dmw_logo.png'),
     webPreferences: {
@@ -69,13 +69,8 @@ function createWindow() {
     },
   });
 
-  if (needsSetup) {
-    // Show the network setup screen on first run
-    mainWindow.loadFile(path.join(__dirname, 'src', 'network-setup.html'));
-    console.log('[SETUP] Showing network setup screen');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  }
+  mainWindow.loadFile(path.join(__dirname, 'src', 'network-setup.html'));
+  console.log('[SETUP] Showing network setup screen');
 
   const menu = Menu.buildFromTemplate([]);
   Menu.setApplicationMenu(menu);
@@ -198,61 +193,11 @@ app.whenReady().then(async () => {
   netCfg.init(app.getPath('userData'));
 
   // Register network IPC handlers first (always, regardless of role)
+  // Role-specific setup (DB, API server, proxy handlers) is triggered AFTER
+  // the user confirms their role in the setup screen via network:saveConfig.
   registerNetworkHandlers();
 
-  // Read persisted network config
-  const cfg = netCfg.read();
-  currentRole = cfg.role;
-
-  if (currentRole === 'server') {
-    // ── SERVER role ──────────────────────────────────────────────────────────
-    console.log('[ROLE] Starting as SERVER');
-
-    // Register DB-backed IPC handlers (used by the local Electron window)
-    if (!handlersRegistered) {
-      try {
-        const { registerAllHandlers } = require('./ipc/handlers');
-        registerAllHandlers();
-        handlersRegistered = true;
-        console.log('[IPC] IPC handlers registered');
-      } catch (e) {
-        console.error('[ERROR] Error registering handlers:', e.message);
-      }
-    }
-
-    // Test local DB connection
-    const db = require('./database/connection');
-    const connected = await db.testConnection();
-    if (!connected) {
-      console.warn('[WARNING] Database connection failed. Check your .env configuration.');
-    }
-
-    // Start the HTTP API server so client PCs can connect
-    try {
-      const { ip, port } = await apiServer.start();
-      console.log(`[API] HTTP API server running at http://${ip}:${port}`);
-    } catch (e) {
-      console.error('[API] Failed to start API server:', e.message);
-    }
-
-  } else if (currentRole === 'client') {
-    // ── CLIENT role ──────────────────────────────────────────────────────────
-    console.log('[ROLE] Starting as CLIENT, server IP:', cfg.serverIp);
-
-    if (!cfg.serverIp) {
-      console.warn('[WARNING] Client role set but no server IP configured. Will show setup screen.');
-      currentRole = null;   // fall through to show setup
-    } else {
-      apiClient.configure(cfg.serverIp, apiServer.DEFAULT_PORT);
-
-      // Register IPC handlers that proxy to the HTTP server
-      registerClientProxyHandlers();
-    }
-
-  } else {
-    // ── FIRST RUN / unconfigured ──────────────────────────────────────────
-    console.log('[ROLE] No role configured. Setup screen will appear.');
-  }
+  console.log('[ROLE] Setup screen will be shown. Role activation deferred until user confirms.');
 
   createWindow();
   registerKeyboardShortcuts();
@@ -264,7 +209,15 @@ app.whenReady().then(async () => {
 
 // ─── CLIENT: proxy every IPC call to the HTTP API ────────────────────────────
 
+let clientProxyHandlersRegistered = false;
+
 function registerClientProxyHandlers() {
+  if (clientProxyHandlersRegistered) {
+    console.log('[IPC] Client proxy handlers already registered, skipping.');
+    return;
+  }
+  clientProxyHandlersRegistered = true;
+
   // Helper: wraps each apiClient method as an ipcMain.handle
   function proxy(channel, fn) {
     ipcMain.handle(channel, async (_, ...args) => fn(...args));
