@@ -4163,10 +4163,15 @@ async function openMonitoringForm(id = null) {
       <div class="form-group">
         <label>Evidence Path</label>
         <div style="display:flex; gap:8px; align-items:center;">
-          <input class="form-input" id="fMonEvidenceCompact" value="${rec?.evidence_path || ''}" placeholder="Select folder or file(s)" style="flex:1;">
-          <button type="button" class="btn btn-secondary" id="fMonEvidencePickFolder">Folder</button>
-          <button type="button" class="btn btn-secondary" id="fMonEvidencePickFiles">Files</button>
+          <div id="fMonEvidenceDropZone" style="border:2px dashed #ccc; border-radius:4px; padding:0 12px; text-align:center; cursor:pointer; background-color:#f9f9f9; transition:all 0.3s ease; height:40px; display:flex; align-items:center; justify-content:center; flex:1;">
+            <div style="color:#666; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>
+            </div>
+            <div id="fMonEvidencePreview" style="font-size:12px; color:#0066cc; display:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+          </div>
+          <button type="button" class="btn btn-secondary" id="fMonEvidenceDelete" style="display:none;">Delete</button>
         </div>
+        <input class="form-input" id="fMonEvidenceCompact" value="${rec?.evidence_path || ''}" placeholder="Selected path(s) will appear here" style="display:none;">
       </div>
     </div>
     <div class="form-group">
@@ -4232,35 +4237,111 @@ async function openMonitoringForm(id = null) {
   );
 
   const evidenceInput = document.getElementById('fMonEvidenceCompact');
-  const pickFolderBtn = document.getElementById('fMonEvidencePickFolder');
-  const pickFilesBtn = document.getElementById('fMonEvidencePickFiles');
+  const dropZone = document.getElementById('fMonEvidenceDropZone');
+  const preview = document.getElementById('fMonEvidencePreview');
+  const deleteBtn = document.getElementById('fMonEvidenceDelete');
 
-  if (pickFolderBtn && evidenceInput) {
-    pickFolderBtn.addEventListener('click', async () => {
+  // Helper function to update evidence path
+  const updateEvidencePath = (paths) => {
+    if (paths && paths.length > 0) {
+      evidenceInput.value = paths.join('; ');
+      const lastPath = paths[paths.length - 1];
+      const fileName = lastPath.split('\\').pop().split('/').pop() || lastPath;
+      preview.textContent = fileName + (paths.length > 1 ? ` (+${paths.length - 1} more)` : '');
+      preview.style.display = 'inline';
+      dropZone.querySelector('div').style.display = 'none';
+      deleteBtn.style.display = 'block';
+    }
+  };
+
+  // Helper function to clear evidence path
+  const clearEvidencePath = () => {
+    evidenceInput.value = '';
+    preview.textContent = '';
+    preview.style.display = 'none';
+    dropZone.querySelector('div').style.display = 'block';
+    deleteBtn.style.display = 'none';
+  };
+
+  // Helper function to process dropped files/folders
+  const processDroppedFiles = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    
+    try {
+      // Collect file paths
+      const paths = [];
+      for (let file of fileList) {
+        paths.push(file.path);
+      }
+      updateEvidencePath(paths);
+    } catch (err) {
+      showToast('Failed to process files: ' + err.message, 'error');
+    }
+  };
+
+  // Drag and drop handlers
+  if (dropZone && evidenceInput) {
+    // Handle drag over
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.style.backgroundColor = '#e8f0ff';
+      dropZone.style.borderColor = '#0066cc';
+    });
+
+    // Handle drag leave
+    dropZone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.style.backgroundColor = '#f9f9f9';
+      dropZone.style.borderColor = '#ccc';
+    });
+
+    // Handle drop
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.style.backgroundColor = '#f9f9f9';
+      dropZone.style.borderColor = '#ccc';
+
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        await processDroppedFiles(files);
+      }
+    });
+
+    // Handle click to open file picker
+    dropZone.addEventListener('click', async () => {
       try {
-        const result = await window.api.pickMonitoringEvidencePath('folder');
+        const result = await window.api.pickMonitoringEvidencePath('both');
         if (!result || result.canceled || !Array.isArray(result.paths) || result.paths.length === 0) {
           return;
         }
-        evidenceInput.value = result.paths[0];
+        updateEvidencePath(result.paths);
       } catch (err) {
-        showToast('Failed to pick folder: ' + err.message, 'error');
+        showToast('Failed to pick files/folders: ' + err.message, 'error');
       }
     });
-  }
 
-  if (pickFilesBtn && evidenceInput) {
-    pickFilesBtn.addEventListener('click', async () => {
-      try {
-        const result = await window.api.pickMonitoringEvidencePath('files');
-        if (!result || result.canceled || !Array.isArray(result.paths) || result.paths.length === 0) {
-          return;
-        }
-        evidenceInput.value = result.paths.join('; ');
-      } catch (err) {
-        showToast('Failed to pick files: ' + err.message, 'error');
+    // Initialize preview if evidence path already exists
+    if (evidenceInput.value) {
+      const paths = evidenceInput.value.split('; ').filter(p => p.trim());
+      if (paths.length > 0) {
+        const lastPath = paths[paths.length - 1];
+        const fileName = lastPath.split('\\').pop().split('/').pop() || lastPath;
+        preview.textContent = fileName + (paths.length > 1 ? ` (+${paths.length - 1} more)` : '');
+        preview.style.display = 'inline';
+        dropZone.querySelector('div').style.display = 'none';
+        deleteBtn.style.display = 'block';
       }
-    });
+    }
+
+    // Handle delete button
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        clearEvidencePath();
+      });
+    }
   }
   } catch (err) {
     showToast('Error loading monitoring form: ' + err.message, 'error');

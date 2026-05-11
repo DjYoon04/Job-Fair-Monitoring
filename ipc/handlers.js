@@ -1154,13 +1154,14 @@ function registerMonitoringHandlers() {
   ipcMain.handle('monitoring:pickEvidencePath', async (_, mode = 'files') => {
     const focusedWindow = BrowserWindow.getFocusedWindow() || undefined;
     const isFolderMode = mode === 'folder';
+    const isBothMode = mode === 'both';
 
     const options = {
-      title: isFolderMode ? 'Select Evidence Folder' : 'Select Evidence File(s)',
+      title: isFolderMode ? 'Select Evidence Folder' : (isBothMode ? 'Select Evidence Files or Folders' : 'Select Evidence File(s)'),
       properties: isFolderMode
         ? ['openDirectory']
-        : ['openFile', 'multiSelections'],
-      buttonLabel: isFolderMode ? 'Select Folder' : 'Select File(s)',
+        : (isBothMode ? ['openFile', 'openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']),
+      buttonLabel: isFolderMode ? 'Select Folder' : (isBothMode ? 'Select' : 'Select File(s)'),
     };
 
     const result = await dialog.showOpenDialog(focusedWindow, options);
