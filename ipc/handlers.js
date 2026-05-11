@@ -1485,4 +1485,4 @@ function registerDashboardHandlers() {
   });
 }
 
-module.exports = { registerAllHandlers };
+module.exports = { registerAllHandlers, ...require('./handlers-exports') };

@@ -718,6 +718,46 @@ body.auth-required .auth-screen {
   text-align: center;
 }
 
+.network-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f0f4f8;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.network-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: none;
+}
+
+.network-status-dot.server {
+  background: #16a34a;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.4);
+}
+
+.network-status-dot.client {
+  background: #0891b2;
+  box-shadow: 0 0 6px rgba(8, 145, 178, 0.4);
+}
+
+.network-status-dot.offline {
+  background: #dc2626;
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.4);
+}
+
+.network-status-label {
+  font-size: 12px;
+}
+
 .topbar-notif-panel {
   position: absolute;
   right: 0;

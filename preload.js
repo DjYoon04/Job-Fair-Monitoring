@@ -70,4 +70,24 @@ contextBridge.exposeInMainWorld('api', {
   getMonitoringSummary: (year) => ipcRenderer.invoke('summary:monitoring', year),
   getEventDetails: (filters) => ipcRenderer.invoke('summary:eventDetails', filters),
   getYearlyTotals: (year) => ipcRenderer.invoke('summary:yearlyTotals', year),
+
+  // ── Network / Setup ──────────────────────────────────────────────────────
+  // Returns { role, serverIp, localIp, allIps, apiPort }
+  getNetworkConfig: () => ipcRenderer.invoke('network:getConfig'),
+
+  // Save chosen role + server IP; validates connectivity for client role
+  // Returns { ok: true } or throws an error string
+  saveNetworkConfig: (data) => ipcRenderer.invoke('network:saveConfig', data),
+
+  // Returns { ip, all, port } — current machine's LAN IP(s)
+  getLocalIP: () => ipcRenderer.invoke('network:getLocalIP'),
+
+  // Clear saved config (shows setup screen on next launch)
+  resetNetworkConfig: () => ipcRenderer.invoke('network:resetConfig'),
+
+  // Ping a specific IP to see if the server is reachable: { ok: bool }
+  pingServer: (ip) => ipcRenderer.invoke('network:ping', ip),
+
+  // Returns { running, ip, port } for server role; { running: false } for client
+  getServerStatus: () => ipcRenderer.invoke('network:serverStatus'),
 });

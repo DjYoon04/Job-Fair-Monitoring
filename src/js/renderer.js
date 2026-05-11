@@ -157,6 +157,7 @@ async function bootstrapAppAfterLogin() {
     setupModalHandlers();
     setupUserMenuHandlers();
     setupGlobalSearch();
+    setupNetworkStatus();
     setupPageHandlers();
     appInitialized = true;
   }
@@ -655,6 +656,32 @@ function applyPageSearch(page, query) {
     const text = card.textContent.toLowerCase();
     card.style.display = !hasTerm || text.includes(term) ? '' : 'none';
   });
+}
+
+async function setupNetworkStatus() {
+  try {
+    const config = await window.api.getNetworkConfig();
+    const indicator = document.getElementById('networkStatusIndicator');
+    const dot = document.querySelector('.network-status-dot');
+    const label = document.getElementById('networkStatusLabel');
+
+    if (!indicator || !dot || !label) return;
+
+    if (config.role === 'server') {
+      dot.className = 'network-status-dot server';
+      label.textContent = `Server (${config.localIp})`;
+      indicator.title = `Server PC - API running at ${config.localIp}:${config.apiPort}`;
+    } else if (config.role === 'client') {
+      dot.className = 'network-status-dot client';
+      label.textContent = `Client (${config.serverIp})`;
+      indicator.title = `Connected to server at ${config.serverIp}:${config.apiPort}`;
+    } else {
+      dot.className = 'network-status-dot offline';
+      label.textContent = 'Unconfigured';
+    }
+  } catch (err) {
+    console.error('Failed to update network status:', err);
+  }
 }
 
 function openAccountInfoModal() {

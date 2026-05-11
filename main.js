@@ -1,29 +1,32 @@
 // main.js - Electron Main Process
+// Now supports two network roles:
+//   SERVER – runs the local PostgreSQL connection + Express HTTP API server.
+//            Other PCs on the LAN connect to this machine.
+//   CLIENT – connects to a remote server via HTTP; no local DB connection needed.
+//
+// On first launch the app shows a setup dialog to choose the role.
+// The choice is persisted to userData/network-config.json.
+
 const path = require('path');
 require('dotenv').config();
 
-let app, BrowserWindow, Menu, globalShortcut;
+let app, BrowserWindow, Menu, globalShortcut, ipcMain, dialog;
 
 try {
-  // Import Electron components - must be done in Electron's main process context
   const electron = require('electron');
-
-  // If electron is a path string (from npm package), we have the wrong electron
   if (typeof electron === 'string') {
-    console.error('ERROR: electron module returned a string path. This shouldn\'t happen.');
-    console.error('Electron path:', electron);
+    console.error('ERROR: electron module returned a string path.');
     process.exit(1);
   }
-
-  app = electron.app;
+  app           = electron.app;
   BrowserWindow = electron.BrowserWindow;
-  Menu = electron.Menu;
-  globalShortcut = electron.globalShortcut;
+  Menu          = electron.Menu;
+  globalShortcut= electron.globalShortcut;
+  ipcMain       = electron.ipcMain;
+  dialog        = electron.dialog;
 
   if (!app) {
     console.error('ERROR: Could not extract app from electron module');
-    console.error('Module type:', typeof electron);
-    console.error('Module keys (first 20):', Object.keys(electron).slice(0, 20));
     process.exit(1);
   }
 } catch (err) {
@@ -31,21 +34,31 @@ try {
   process.exit(1);
 }
 
-const db = require('./database/connection');
+const netCfg    = require('./network/config-manager');
+const apiServer = require('./network/api-server');
+const apiClient = require('./network/api-client');
+const { getLocalIP, getAllLocalIPs } = require('./network/ip-detector');
 
 if (process.platform === 'win32') {
   app.disableHardwareAcceleration();
 }
 
-let mainWindow;
+let mainWindow       = null;
 let handlersRegistered = false;
+let currentRole      = null;   // 'server' | 'client'
+
+// ─── window helpers ──────────────────────────────────────────────────────────
 
 function createWindow() {
+  const cfg = netCfg.read();
+  const needsSetup = !cfg.role || (cfg.role === 'client' && !cfg.serverIp);
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 700,
+    width:    needsSetup ? 600  : 1400,
+    height:   needsSetup ? 620  : 900,
+    minWidth: needsSetup ? 520  : 1100,
+    minHeight:needsSetup ? 560  : 700,
+    resizable:needsSetup ? false: true,
     title: 'Job Fair Monitoring System',
     icon: path.join(__dirname, 'src', 'img', 'dmw_logo.png'),
     webPreferences: {
@@ -56,75 +69,281 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  if (needsSetup) {
+    // Show the network setup screen on first run
+    mainWindow.loadFile(path.join(__dirname, 'src', 'network-setup.html'));
+    console.log('[SETUP] Showing network setup screen');
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  }
 
-  // Build menu - hidden menu (empty array)
   const menu = Menu.buildFromTemplate([]);
   Menu.setApplicationMenu(menu);
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function registerKeyboardShortcuts() {
-  // Ctrl+R - Refresh/Reload the page
   globalShortcut.register('CmdOrCtrl+R', () => {
-    if (mainWindow) {
-      mainWindow.reload();
-      console.log('[REFRESH] Page refreshed (Ctrl+R)');
-    }
+    if (mainWindow) { mainWindow.reload(); }
   });
-
-  // Ctrl+Shift+R - Hard refresh (clear cache and reload)
   globalShortcut.register('CmdOrCtrl+Shift+R', () => {
-    if (mainWindow) {
-      mainWindow.webContents.reloadIgnoringCache();
-      console.log('[REFRESH] Hard refresh executed (Ctrl+Shift+R)');
-    }
+    if (mainWindow) { mainWindow.webContents.reloadIgnoringCache(); }
   });
-
-  console.log('[KEYBOARD] Shortcuts registered: Ctrl+R (refresh), Ctrl+Shift+R (hard refresh)');
 }
 
-app.whenReady().then(async () => {
-  console.log('[START] App ready, registering handlers...');
+// ─── IPC: network config & info ──────────────────────────────────────────────
 
-  // Register IPC handlers AFTER app is ready
-  if (!handlersRegistered) {
-    try {
-      const { registerAllHandlers } = require('./ipc/handlers');
-      registerAllHandlers();
-      handlersRegistered = true;
-      console.log('[IPC] IPC handlers registered');
-    } catch (err) {
-      console.error('[ERROR] Error registering handlers:', err.message);
+function registerNetworkHandlers() {
+  // Renderer asks for the current role and server IP
+  ipcMain.handle('network:getConfig', () => {
+    const cfg = netCfg.read();
+    return {
+      role:     cfg.role,
+      serverIp: cfg.serverIp,
+      localIp:  getLocalIP(),
+      allIps:   getAllLocalIPs(),
+      apiPort:  apiServer.DEFAULT_PORT,
+    };
+  });
+
+  // Renderer submits the setup form (role + optional serverIp)
+  ipcMain.handle('network:saveConfig', async (_, { role, serverIp }) => {
+    if (!['server', 'client'].includes(role)) {
+      throw new Error('Role must be "server" or "client".');
     }
-  }
+    if (role === 'client') {
+      if (!serverIp || !/^\d{1,3}(\.\d{1,3}){3}$/.test(serverIp.trim())) {
+        throw new Error('Please enter a valid server IP address.');
+      }
+      // Test connectivity before saving
+      apiClient.configure(serverIp.trim(), apiServer.DEFAULT_PORT);
+      const reachable = await apiClient.ping();
+      if (!reachable) {
+        throw new Error(
+          `Cannot reach server at ${serverIp.trim()}:${apiServer.DEFAULT_PORT}.\n` +
+          'Make sure the server is running and on the same network.'
+        );
+      }
+    }
 
-  // Test DB connection
-  const connected = await db.testConnection();
-  if (!connected) {
-    console.warn('[WARNING] Database connection failed. Check your .env configuration.');
+    netCfg.write({ role, serverIp: serverIp?.trim() || null });
+    currentRole = role;
+
+    // Apply the new role immediately without requiring a full app restart
+    if (role === 'server') {
+      if (!handlersRegistered) {
+        try {
+          const { registerAllHandlers } = require('./ipc/handlers');
+          registerAllHandlers();
+          handlersRegistered = true;
+        } catch (e) {
+          console.error('[ERROR] Error registering handlers after setup:', e.message);
+        }
+      }
+      if (!apiServer.isRunning()) {
+        try { await apiServer.start(); } catch(e) { console.error('[API]', e.message); }
+      }
+    } else if (role === 'client') {
+      apiClient.configure(serverIp.trim(), apiServer.DEFAULT_PORT);
+      registerClientProxyHandlers();
+    }
+
+    // Reload main window to the full app
+    if (mainWindow) {
+      mainWindow.setResizable(true);
+      mainWindow.setSize(1400, 900);
+      mainWindow.setMinimumSize(1100, 700);
+      mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+    }
+
+    return { ok: true };
+  });
+
+  // Renderer can ask to re-detect the local IP at any time
+  ipcMain.handle('network:getLocalIP', () => ({
+    ip:   getLocalIP(),
+    all:  getAllLocalIPs(),
+    port: apiServer.DEFAULT_PORT,
+  }));
+
+  // Renderer can reset config to trigger the setup screen again on next launch
+  ipcMain.handle('network:resetConfig', () => {
+    netCfg.clear();
+    return { ok: true };
+  });
+
+  // Renderer can ping a specific IP to test reachability
+  ipcMain.handle('network:ping', async (_, ip) => {
+    apiClient.configure(ip, apiServer.DEFAULT_PORT);
+    const ok = await apiClient.ping();
+    return { ok };
+  });
+
+  // Renderer queries whether the API server is running (server role)
+  ipcMain.handle('network:serverStatus', () => {
+    const addr = apiServer.getAddress();
+    return addr
+      ? { running: true,  ip: addr.ip, port: addr.port }
+      : { running: false, ip: null,    port: null };
+  });
+}
+
+// ─── boot sequence ───────────────────────────────────────────────────────────
+
+app.whenReady().then(async () => {
+  console.log('[START] App ready');
+
+  // Init config manager (needs userData path → only available after app ready)
+  netCfg.init(app.getPath('userData'));
+
+  // Register network IPC handlers first (always, regardless of role)
+  registerNetworkHandlers();
+
+  // Read persisted network config
+  const cfg = netCfg.read();
+  currentRole = cfg.role;
+
+  if (currentRole === 'server') {
+    // ── SERVER role ──────────────────────────────────────────────────────────
+    console.log('[ROLE] Starting as SERVER');
+
+    // Register DB-backed IPC handlers (used by the local Electron window)
+    if (!handlersRegistered) {
+      try {
+        const { registerAllHandlers } = require('./ipc/handlers');
+        registerAllHandlers();
+        handlersRegistered = true;
+        console.log('[IPC] IPC handlers registered');
+      } catch (e) {
+        console.error('[ERROR] Error registering handlers:', e.message);
+      }
+    }
+
+    // Test local DB connection
+    const db = require('./database/connection');
+    const connected = await db.testConnection();
+    if (!connected) {
+      console.warn('[WARNING] Database connection failed. Check your .env configuration.');
+    }
+
+    // Start the HTTP API server so client PCs can connect
+    try {
+      const { ip, port } = await apiServer.start();
+      console.log(`[API] HTTP API server running at http://${ip}:${port}`);
+    } catch (e) {
+      console.error('[API] Failed to start API server:', e.message);
+    }
+
+  } else if (currentRole === 'client') {
+    // ── CLIENT role ──────────────────────────────────────────────────────────
+    console.log('[ROLE] Starting as CLIENT, server IP:', cfg.serverIp);
+
+    if (!cfg.serverIp) {
+      console.warn('[WARNING] Client role set but no server IP configured. Will show setup screen.');
+      currentRole = null;   // fall through to show setup
+    } else {
+      apiClient.configure(cfg.serverIp, apiServer.DEFAULT_PORT);
+
+      // Register IPC handlers that proxy to the HTTP server
+      registerClientProxyHandlers();
+    }
+
+  } else {
+    // ── FIRST RUN / unconfigured ──────────────────────────────────────────
+    console.log('[ROLE] No role configured. Setup screen will appear.');
   }
 
   createWindow();
-
-  // Register keyboard shortcuts
   registerKeyboardShortcuts();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-app.on('window-all-closed', async () => {
-  // Unregister all shortcuts
-  globalShortcut.unregisterAll();
-  await db.close();
-  if (process.platform !== 'darwin') {
-    app.quit();
+// ─── CLIENT: proxy every IPC call to the HTTP API ────────────────────────────
+
+function registerClientProxyHandlers() {
+  // Helper: wraps each apiClient method as an ipcMain.handle
+  function proxy(channel, fn) {
+    ipcMain.handle(channel, async (_, ...args) => fn(...args));
   }
+
+  proxy('auth:initialize',          ()     => apiClient.initializeAuth());
+  proxy('auth:login',               (c)    => apiClient.login(c));
+  proxy('auth:logout',              (t)    => apiClient.logout(t));
+  proxy('auth:getSessionUser',      (t)    => { apiClient.setSessionToken(t); return apiClient.getSessionUser(t); });
+
+  proxy('user:getAll',              (t)    => { apiClient.setSessionToken(t); return apiClient.getUsers(); });
+  proxy('user:create',              (d)    => apiClient.createUser(d));
+  proxy('user:updateRole',          (d)    => apiClient.updateUserRole(d));
+  proxy('user:delete',              (d)    => apiClient.deleteUser(d));
+  proxy('user:updateOwnProfile',    (d)    => apiClient.updateOwnProfile(d));
+  proxy('user:changeOwnPassword',   (d)    => apiClient.changeOwnPassword(d));
+
+  proxy('db:test',                  ()     => apiClient.testConnection());
+  proxy('db:getFiscalYears',        ()     => apiClient.getFiscalYears());
+
+  proxy('dashboard:stats',          ()     => apiClient.getDashboardStats());
+
+  proxy('agency:getAll',            ()     => apiClient.getAgencies());
+  proxy('agency:getById',           (id)   => apiClient.getAgencyById(id));
+  proxy('agency:getByType',         (t)    => apiClient.getAgenciesByType(t));
+  proxy('agency:create',            (d)    => apiClient.createAgency(d));
+  proxy('agency:update',            (d)    => apiClient.updateAgency(d));
+  proxy('agency:delete',            (id)   => apiClient.deleteAgency(id));
+
+  proxy('venue:getAll',             ()     => apiClient.getVenues());
+  proxy('venue:getById',            (id)   => apiClient.getVenueById(id));
+  proxy('venue:create',             (d)    => apiClient.createVenue(d));
+  proxy('venue:update',             (d)    => apiClient.updateVenue(d));
+  proxy('venue:delete',             (id)   => apiClient.deleteVenue(id));
+
+  proxy('jfa:getAll',               (f)    => apiClient.getJfaRecords(f));
+  proxy('jfa:getById',              (id)   => apiClient.getJfaById(id));
+  proxy('jfa:create',               (d)    => apiClient.createJfa(d));
+  proxy('jfa:update',               (d)    => apiClient.updateJfa(d));
+  proxy('jfa:delete',               (id)   => apiClient.deleteJfa(id));
+  proxy('jfa:updateDocuments',      (d)    => apiClient.updateJfaDocuments(d));
+  proxy('jfa:getDocumentStatus',    (f)    => apiClient.getJfaDocumentStatus(f));
+
+  proxy('jobfair:getAll',           (f)    => apiClient.getJobFairEvents(f));
+  proxy('jobfair:getById',          (id)   => apiClient.getJobFairById(id));
+  proxy('jobfair:create',           (d)    => apiClient.createJobFairEvent(d));
+  proxy('jobfair:update',           (d)    => apiClient.updateJobFairEvent(d));
+  proxy('jobfair:delete',           (id)   => apiClient.deleteJobFairEvent(id));
+  proxy('jobfair:addParticipant',   (d)    => apiClient.addParticipant(d));
+  proxy('jobfair:updateParticipant',(d)    => apiClient.updateParticipant(d));
+  proxy('jobfair:deleteParticipant',(id)   => apiClient.deleteParticipant(id));
+
+  proxy('monitoring:getAll',            (f) => apiClient.getMonitoringRecords(f));
+  proxy('monitoring:getById',           (id)=> apiClient.getMonitoringById(id));
+  proxy('monitoring:create',            (d) => apiClient.createMonitoring(d));
+  proxy('monitoring:update',            (d) => apiClient.updateMonitoring(d));
+  proxy('monitoring:delete',            (id)=> apiClient.deleteMonitoring(id));
+  proxy('monitoring:pickEvidencePath',  ()  => apiClient.pickMonitoringEvidencePath());
+  proxy('monitoring:openEvidencePath',  (p) => apiClient.openMonitoringEvidencePath(p));
+
+  proxy('summary:jfa',              (y)   => apiClient.getJfaSummary(y));
+  proxy('summary:jobfair',          (y)   => apiClient.getJobFairSummary(y));
+  proxy('summary:monitoring',       (y)   => apiClient.getMonitoringSummary(y));
+  proxy('summary:eventDetails',     (f)   => apiClient.getEventDetails(f));
+  proxy('summary:yearlyTotals',     (y)   => apiClient.getYearlyTotals(y));
+
+  console.log('[IPC] Client proxy handlers registered');
+}
+
+// ─── shutdown ─────────────────────────────────────────────────────────────────
+
+app.on('window-all-closed', async () => {
+  globalShortcut.unregisterAll();
+
+  if (currentRole === 'server') {
+    await apiServer.stop();
+    const db = require('./database/connection');
+    await db.close();
+  }
+
+  if (process.platform !== 'darwin') app.quit();
 });
