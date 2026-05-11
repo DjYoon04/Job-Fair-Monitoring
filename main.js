@@ -125,7 +125,8 @@ function registerNetworkHandlers() {
     netCfg.write({ role, serverIp: serverIp?.trim() || null });
     currentRole = role;
 
-    // Apply the new role immediately without requiring a full app restart
+    // Apply the new role — skip if already activated at startup (guards against
+    // double-registering handlers or starting the API server twice).
     if (role === 'server') {
       if (!handlersRegistered) {
         try {
@@ -140,7 +141,9 @@ function registerNetworkHandlers() {
         try { await apiServer.start(); } catch(e) { console.error('[API]', e.message); }
       }
     } else if (role === 'client') {
+      // Always (re-)configure the client in case the IP changed
       apiClient.configure(serverIp.trim(), apiServer.DEFAULT_PORT);
+      // registerClientProxyHandlers() is idempotent (guards internally)
       registerClientProxyHandlers();
     }
 
@@ -193,11 +196,32 @@ app.whenReady().then(async () => {
   netCfg.init(app.getPath('userData'));
 
   // Register network IPC handlers first (always, regardless of role)
-  // Role-specific setup (DB, API server, proxy handlers) is triggered AFTER
-  // the user confirms their role in the setup screen via network:saveConfig.
   registerNetworkHandlers();
 
-  console.log('[ROLE] Setup screen will be shown. Role activation deferred until user confirms.');
+  // ── Apply any previously-saved role immediately so IPC handlers are ready
+  // before the setup screen loads. Without this, a client-role PC on relaunch
+  // would have no proxy handlers registered while the setup screen is shown,
+  // and any early IPC call would fall through to a local (non-existent) DB.
+  const savedCfg = netCfg.read();
+  if (savedCfg.role === 'server') {
+    console.log('[ROLE] Restoring saved role: server');
+    try {
+      const { registerAllHandlers } = require('./ipc/handlers');
+      registerAllHandlers();
+      handlersRegistered = true;
+    } catch (e) {
+      console.error('[ERROR] Error registering server handlers on restore:', e.message);
+    }
+    try { await apiServer.start(); } catch (e) { console.error('[API]', e.message); }
+    currentRole = 'server';
+  } else if (savedCfg.role === 'client' && savedCfg.serverIp) {
+    console.log('[ROLE] Restoring saved role: client →', savedCfg.serverIp);
+    apiClient.configure(savedCfg.serverIp, apiServer.DEFAULT_PORT);
+    registerClientProxyHandlers();
+    currentRole = 'client';
+  } else {
+    console.log('[ROLE] No saved role. Setup screen will prompt user.');
+  }
 
   createWindow();
   registerKeyboardShortcuts();
