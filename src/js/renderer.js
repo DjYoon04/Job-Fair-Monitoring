@@ -671,6 +671,30 @@ async function setupNetworkStatus() {
       dot.className = 'network-status-dot server';
       label.textContent = `Server (${config.localIp})`;
       indicator.title = `Server PC - API running at ${config.localIp}:${config.apiPort}`;
+
+      // Show the dashboard IP banner
+      const banner = document.getElementById('serverIpBanner');
+      const addrEl = document.getElementById('serverIpBannerAddress');
+      const copyBtn = document.getElementById('serverIpCopyBtn');
+      if (banner && addrEl) {
+        addrEl.textContent = `${config.localIp}:${config.apiPort}`;
+        banner.style.display = 'flex';
+      }
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          const text = `${config.localIp}:${config.apiPort}`;
+          navigator.clipboard.writeText(text).then(() => {
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            setTimeout(() => {
+              copyBtn.classList.remove('copied');
+              copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+            }, 2000);
+          }).catch(() => {
+            showToast('Could not copy to clipboard', 'error');
+          });
+        });
+      }
     } else if (config.role === 'client') {
       dot.className = 'network-status-dot client';
       label.textContent = `Client (${config.serverIp})`;
