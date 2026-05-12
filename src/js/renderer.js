@@ -1297,32 +1297,32 @@ function getMonitoringDateValue(value) {
 // ============================================================================
 
 function createPdfHeader(title, scale = 1) {
-  const logoSize = Math.round(100 * scale);
-  const rightLogoWidth = Math.round(110 * scale);
-  const centerWidth = Math.round(680 * scale);
-  const republicFontSize = Math.round(14 * scale);
-  const departmentFontSize = Math.round(31 * scale);
-  const officeFontSize = Math.round(18 * scale);
-  const addressFontSize = Math.round(12 * scale);
-  const titleFontSize = Math.round(16 * scale);
+  const logoSize        = Math.round(100 * scale);
+  const rightLogoWidth  = Math.round(120 * scale);
+  const centerWidth     = Math.round(680 * scale);
+  const republicFontSize    = Math.round(13 * scale);
+  const departmentFontSize  = Math.round(30 * scale);
+  const officeFontSize      = Math.round(16 * scale);
+  const addressFontSize     = Math.round(11 * scale);
+  const titleFontSize       = Math.round(15 * scale);
 
   return `
-    <div style="display:flex; align-items:center; justify-content:center; margin-bottom:12px; border-bottom:1px solid #d5deea; padding:0 6px 10px; gap:6px;">
-      <!-- Left Logo -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px 10px; border-bottom:2px solid #1b3457; margin-bottom:10px;">
+      <!-- Left Logo (DMW) -->
       <div style="flex:0 0 ${logoSize}px; display:flex; align-items:center; justify-content:center;">
         <img src="img/dmw_logo.png" style="width:${logoSize}px; height:${logoSize}px; object-fit:contain;" alt="DMW Logo">
       </div>
 
       <!-- Center Content -->
-      <div style="width:${centerWidth}px; max-width:${centerWidth}px; text-align:center;">
-        <p style="margin:0 0 4px 0; font-size:${republicFontSize}px; color:#2d4771; font-style:italic;">Republic of the Philippines</p>
-        <h1 style="margin:0; font-size:${departmentFontSize}px; line-height:1.05; color:#1b3457; font-family:'Old English Text MT','UnifrakturCook','UnifrakturMaguntia',serif; font-weight:700;">Department of Migrant Workers</h1>
-        <h2 style="margin:4px 0 5px 0; font-size:${officeFontSize}px; color:#1b3457; font-weight:600;">Regional Office - XIII (Caraga)</h2>
-        <p style="margin:0; font-size:${addressFontSize}px; color:#4f6482;">3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600</p>
-        <p style="margin:7px 0 0 0; font-size:${titleFontSize}px; color:#3a5f89; font-weight:700; text-transform:uppercase;">${title}</p>
+      <div style="flex:1; max-width:${centerWidth}px; text-align:center; padding:0 10px;">
+        <p style="margin:0 0 2px 0; font-size:${republicFontSize}px; color:#1b3457; font-style:italic; font-weight:400;">Republic of the Philippines</p>
+        <h1 style="margin:0 0 2px 0; font-size:${departmentFontSize}px; line-height:1.1; color:#1b3457; font-family:'Old English Text MT','UnifrakturCook','UnifrakturMaguntia','MedievalSharp',serif; font-weight:700;">Department of Migrant Workers</h1>
+        <h2 style="margin:2px 0 3px 0; font-size:${officeFontSize}px; color:#1b3457; font-weight:700; letter-spacing:0.3px;">Regional Office - XIII (Caraga)</h2>
+        <p style="margin:0 0 5px 0; font-size:${addressFontSize}px; color:#555;">3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600</p>
+        <p style="margin:0; font-size:${titleFontSize}px; color:#1b3457; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${title}</p>
       </div>
 
-      <!-- Right Logo -->
+      <!-- Right Logo (Bagong Pilipinas) -->
       <div style="flex:0 0 ${rightLogoWidth}px; display:flex; align-items:center; justify-content:center;">
         <img src="img/Bagong_Pilipinas_logo.png" style="width:${rightLogoWidth}px; height:${logoSize}px; object-fit:contain;" alt="Bagong Pilipinas Logo">
       </div>
@@ -1415,18 +1415,44 @@ async function exportTableToPdf(tableSelector, filename) {
     const margin = 8;
     const contentW = pageW - margin * 2;
 
-    // ── Title from filename ──────────────────────────────────────────────────
+    // ── Title & "FOR THE MONTH OF …" subtitle ────────────────────────────────
+    // Each export reads its own year/month filter fields so the header always
+    // reflects exactly what the user has filtered — or omits the subtitle when
+    // no specific month is selected.
     let title = filename.replace(/_/g, ' ').replace('.pdf', '').toUpperCase();
-    let monitoringMonthSubtitle = '';   // shown below the main title, monitoring export only
+    let monitoringMonthSubtitle = '';   // "FOR THE MONTH OF <MONTH>" — all exports
+
+    function buildMonthSubtitle(monthFieldId) {
+      const raw = getFormValue(monthFieldId) || '';
+      if (!raw || raw === '' || raw === '0') return '';
+      const monthName = MONTHS[parseInt(raw, 10)] || '';
+      return monthName ? `FOR THE MONTH OF ${monthName.toUpperCase()}` : '';
+    }
+
     if (isMonitoringExport) {
-      const selectedYear  = getFormValue('monFilterYear')  || new Date().getFullYear();
-      const selectedMonth = getFormValue('monFilterMonth') || '';
+      const selectedYear = getFormValue('monFilterYear') || new Date().getFullYear();
       title = `${selectedYear} JOB FAIR MONITORING`;
-      // Build "FOR THE MONTH OF MARCH" — omit if no specific month is selected
-      if (selectedMonth && selectedMonth !== '' && selectedMonth !== '0') {
-        const monthName = MONTHS[parseInt(selectedMonth, 10)] || '';
-        if (monthName) monitoringMonthSubtitle = `FOR THE MONTH OF ${monthName.toUpperCase()}`;
-      }
+      monitoringMonthSubtitle = buildMonthSubtitle('monFilterMonth');
+
+    } else if (isJfaTrackingExport) {
+      const selectedYear = getFormValue('jfaFilterYear') || new Date().getFullYear();
+      title = `${selectedYear} JFA TRACKING`;
+      monitoringMonthSubtitle = buildMonthSubtitle('jfaFilterMonth');
+
+    } else if (isLargeHeaderExport) {   // Job Fair Reports
+      const selectedYear = getFormValue('jfFilterYear') || new Date().getFullYear();
+      title = `${selectedYear} JOB FAIR REPORTS`;
+      monitoringMonthSubtitle = buildMonthSubtitle('jfFilterMonth');
+
+    } else if (isJfaSummaryExport) {
+      const selectedYear = getFormInt('sumYear') || new Date().getFullYear();
+      title = `${selectedYear} JFA SUMMARY`;
+      // Summary has no month filter — subtitle intentionally left blank
+
+    } else if (isJobFairSummaryExport) {
+      const selectedYear = getFormInt('sumYear') || new Date().getFullYear();
+      title = `${selectedYear} JOB FAIR SUMMARY`;
+      // Summary has no month filter — subtitle intentionally left blank
     }
 
     // ── Draw letterhead on every page ───────────────────────────────────────
@@ -1436,11 +1462,11 @@ async function exportTableToPdf(tableSelector, filename) {
     function drawHeader(doc, pageNum, totalPages) {
       const y0 = margin;
 
-      // Logos — sized to fill the letterhead height and vertically centred
-      const logoSize = 22;          // mm — both logos are square/near-square
-      const logoY    = y0 + (headerH - logoSize) / 2;   // centre vertically in header
+      // ── Logo sizing & vertical centering ──────────────────────────────────
+      const logoSize = 22;          // mm — DMW logo (square)
+      const logoY    = y0 + (headerH - logoSize) / 2;
 
-      // Left logo (DMW)
+      // Left logo (DMW seal)
       try {
         const leftImg = document.querySelector('img[alt="DMW Logo"]') ||
                         document.querySelector('img[src*="dmw_logo"]');
@@ -1453,7 +1479,7 @@ async function exportTableToPdf(tableSelector, filename) {
         }
       } catch(_) {}
 
-      // Right logo (Bagong Pilipinas)
+      // Right logo (Bagong Pilipinas) — preserve aspect ratio
       try {
         const rightImg = document.querySelector('img[alt="Bagong Pilipinas Logo"]') ||
                          document.querySelector('img[src*="Bagong_Pilipinas"]');
@@ -1462,70 +1488,77 @@ async function exportTableToPdf(tableSelector, filename) {
           canvas.width  = rightImg.naturalWidth  || 110;
           canvas.height = rightImg.naturalHeight || 80;
           canvas.getContext('2d').drawImage(rightImg, 0, 0);
-          // Bagong Pilipinas is wider — keep aspect ratio relative to logoSize height
           const aspect = (rightImg.naturalWidth || 110) / (rightImg.naturalHeight || 80);
           const rW = logoSize * aspect;
           doc.addImage(canvas.toDataURL('image/png'), 'PNG', pageW - margin - rW, logoY, rW, logoSize);
         }
       } catch(_) {}
 
-      // Center text block
+      // ── Center text block ─────────────────────────────────────────────────
       const cx = pageW / 2;
+
+      // "Republic of the Philippines" — italic, dark navy
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7);
-      doc.setTextColor(45, 71, 113);
+      doc.setTextColor(27, 52, 87);
       doc.text('Republic of the Philippines', cx, y0 + 5, { align: 'center' });
 
+      // "Department of Migrant Workers" — bold, large, dark navy
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
+      doc.setFontSize(14);
       doc.setTextColor(27, 52, 87);
-      doc.text('Department of Migrant Workers', cx, y0 + 11, { align: 'center' });
+      doc.text('Department of Migrant Workers', cx, y0 + 11.5, { align: 'center' });
 
+      // "Regional Office - XIII (Caraga)" — bold, medium, dark navy
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(27, 52, 87);
       doc.text('Regional Office - XIII (Caraga)', cx, y0 + 17, { align: 'center' });
 
+      // Address — normal, small, medium gray
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
-      doc.setTextColor(79, 100, 130);
+      doc.setFontSize(6);
+      doc.setTextColor(85, 85, 85);
       doc.text(
         '3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600',
         cx, y0 + 21.5, { align: 'center' }
       );
 
-      // Title line
+      // ── Document title — bold, dark navy, same color as header text ───────
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.setTextColor(58, 95, 137);
+      doc.setTextColor(27, 52, 87);
       doc.text(title, cx, y0 + 26, { align: 'center' });
 
-      // Month subtitle — "FOR THE MONTH OF MARCH" (monitoring only, when a month is filtered)
+      // Month subtitle (monitoring only, when a specific month is filtered)
       if (monitoringMonthSubtitle) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(7.5);
-        doc.setTextColor(58, 95, 137);
+        doc.setTextColor(27, 52, 87);
         doc.text(monitoringMonthSubtitle, cx, y0 + 31, { align: 'center' });
       }
 
-      // Separator line — pushed down when subtitle is present
+      // ── Separator line (thick, dark navy — matches the reference image) ───
       const sepY = monitoringMonthSubtitle ? y0 + 33.5 : y0 + 28.5;
-      doc.setDrawColor(213, 222, 234);
-      doc.setLineWidth(0.4);
+      doc.setDrawColor(27, 52, 87);
+      doc.setLineWidth(0.6);
       doc.line(margin, sepY, pageW - margin, sepY);
 
-      // Page number (bottom right)
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
-      doc.setTextColor(150, 150, 150);
-      doc.text(`Page ${pageNum} of ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
-
-      // Footer line
+      // ── Footer ────────────────────────────────────────────────────────────
+      // Separator line
       doc.setDrawColor(200, 200, 200);
       doc.setLineWidth(0.3);
       doc.line(margin, pageH - 7, pageW - margin, pageH - 7);
+
+      // Footer center note
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(6.5);
+      doc.setTextColor(150, 150, 150);
       doc.text('This document was automatically generated by the Job Fair Monitoring System', cx, pageH - 3.5, { align: 'center' });
+
+      // Page number (bottom right)
+      doc.setFontSize(7);
+      doc.text(`Page ${pageNum} of ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
     }
 
     // ── Clone & clean table ──────────────────────────────────────────────────
@@ -1609,22 +1642,43 @@ async function exportTableToPdf(tableSelector, filename) {
     // ── Font size & column widths ────────────────────────────────────────────
     let bodyFontSize = 7.5;
     let headFontSize = 7;
-    if (isJfaExport)      { bodyFontSize = 8;   headFontSize = 7.5; }
-    if (isJobFairExport)  { bodyFontSize = 7;   headFontSize = 6.5; }
-    if (isMonitoringExport){ bodyFontSize = 6.5; headFontSize = 6; }
+    if (isJfaExport)       { bodyFontSize = 8;   headFontSize = 7.5; }
+    if (isJobFairExport)   { bodyFontSize = 7;   headFontSize = 6.5; }
+    if (isMonitoringExport){ bodyFontSize = 6.5; headFontSize = 6;   }
 
-    // Optional explicit column widths (as % of contentW, converted to mm)
+    // All percentage arrays MUST sum to exactly 100 so the table fills
+    // contentW with no blank space on the right side of the page.
     let columnStyles = {};
+
     if (isJfaExport) {
-      const jfaPcts = [3,8,14,8,15,8,8,8,8,10];
+      // 10 cols: No. | JFA No. | Agency | Date | Venue | Affidavit | Job Orders | Rep ID | Terminal | Remarks
+      const jfaPcts = [3, 9, 16, 9, 17, 9, 9, 9, 9, 10];   // Σ = 100
       jfaPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+
     } else if (isJobFairExport) {
-      const jfPcts = [13,6,11,11,6,4,4,4,4,4,4,6,6,4,8];
+      // 15 cols: Agency | Date | Venue | Rec.Agencies | #JFs | M | F | T | M | F | T | Land | Sea | Total | JFANo
+      const jfPcts = [14, 6, 11, 11, 6, 4, 4, 4, 4, 4, 4, 6, 6, 4, 12];   // Σ = 100
       jfPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+
     } else if (isMonitoringExport) {
-      // Percentages sum to exactly 100 so the table fills contentW with no right gap
-      const monPcts = [3,9,7,11,7,6,6,7,7,7,7,7,8,8];
+      // 14 cols: NO. | Agency | Date | Venue | Celebration | JF Mon. | PEOS | Comm.Letter | Invitation | Deadline | Transmittal | Evidence | Monitored By | Remarks
+      const monPcts = [3, 9, 7, 11, 7, 6, 6, 7, 7, 7, 7, 7, 8, 8];   // Σ = 100
       monPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+
+    } else if (isJfaSummaryExport) {
+      // 6 cols: Month | JFA Issued | Completed | Cancelled | Not Participated | Active
+      const jfaSumPcts = [20, 16, 16, 16, 16, 16];   // Σ = 100
+      jfaSumPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+
+    } else if (isJobFairSummaryExport) {
+      // 8 cols: Month | No. of Job Fairs | Male | Female | Total Applicants | Land-Based | Sea-Based | Total Agencies
+      const jfSumPcts = [14, 14, 12, 12, 12, 12, 12, 12];   // Σ = 100
+      jfSumPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+
+    } else {
+      // Agencies, Venues, and any other single-section exports:
+      // 'wrap' tells jsPDF-AutoTable to distribute all columns evenly across contentW
+      columnStyles['*'] = { cellWidth: 'wrap' };
     }
 
     // ── Run autoTable ────────────────────────────────────────────────────────
@@ -1633,7 +1687,7 @@ async function exportTableToPdf(tableSelector, filename) {
       body:         bodyRows,
       startY:       margin + headerH,       // start below letterhead
       margin:       { top: margin + headerH, bottom: 12, left: margin, right: margin },
-      tableWidth:   contentW,
+      tableWidth:   'fixed',   // forces table to fill exactly contentW — no right-side blank space
       styles: {
         fontSize:    bodyFontSize,
         cellPadding: 1.5,
