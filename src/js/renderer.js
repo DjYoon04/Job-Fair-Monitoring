@@ -1417,40 +1417,55 @@ async function exportTableToPdf(tableSelector, filename) {
 
     // ── Title from filename ──────────────────────────────────────────────────
     let title = filename.replace(/_/g, ' ').replace('.pdf', '').toUpperCase();
+    let monitoringMonthSubtitle = '';   // shown below the main title, monitoring export only
     if (isMonitoringExport) {
-      const selectedYear = getFormValue('monFilterYear') || new Date().getFullYear();
+      const selectedYear  = getFormValue('monFilterYear')  || new Date().getFullYear();
+      const selectedMonth = getFormValue('monFilterMonth') || '';
       title = `${selectedYear} JOB FAIR MONITORING`;
+      // Build "FOR THE MONTH OF MARCH" — omit if no specific month is selected
+      if (selectedMonth && selectedMonth !== '' && selectedMonth !== '0') {
+        const monthName = MONTHS[parseInt(selectedMonth, 10)] || '';
+        if (monthName) monitoringMonthSubtitle = `FOR THE MONTH OF ${monthName.toUpperCase()}`;
+      }
     }
 
     // ── Draw letterhead on every page ───────────────────────────────────────
-    const headerH = 28; // mm reserved for letterhead on each page
+    // If a month subtitle is present the header needs 5 mm extra to fit it.
+    const headerH = monitoringMonthSubtitle ? 36 : 30; // mm — must be >= logo height (22mm) + text rows
 
     function drawHeader(doc, pageNum, totalPages) {
       const y0 = margin;
 
-      // Left logo
+      // Logos — sized to fill the letterhead height and vertically centred
+      const logoSize = 22;          // mm — both logos are square/near-square
+      const logoY    = y0 + (headerH - logoSize) / 2;   // centre vertically in header
+
+      // Left logo (DMW)
       try {
-        const leftImg  = document.querySelector('img[alt="DMW Logo"]') ||
-                         document.querySelector('img[src*="dmw_logo"]');
+        const leftImg = document.querySelector('img[alt="DMW Logo"]') ||
+                        document.querySelector('img[src*="dmw_logo"]');
         if (leftImg && leftImg.complete) {
           const canvas = document.createElement('canvas');
-          canvas.width = leftImg.naturalWidth || 80;
+          canvas.width  = leftImg.naturalWidth  || 80;
           canvas.height = leftImg.naturalHeight || 80;
           canvas.getContext('2d').drawImage(leftImg, 0, 0);
-          doc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, y0, 18, 18);
+          doc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, logoY, logoSize, logoSize);
         }
       } catch(_) {}
 
-      // Right logo
+      // Right logo (Bagong Pilipinas)
       try {
         const rightImg = document.querySelector('img[alt="Bagong Pilipinas Logo"]') ||
                          document.querySelector('img[src*="Bagong_Pilipinas"]');
         if (rightImg && rightImg.complete) {
           const canvas = document.createElement('canvas');
-          canvas.width = rightImg.naturalWidth || 110;
+          canvas.width  = rightImg.naturalWidth  || 110;
           canvas.height = rightImg.naturalHeight || 80;
           canvas.getContext('2d').drawImage(rightImg, 0, 0);
-          doc.addImage(canvas.toDataURL('image/png'), 'PNG', pageW - margin - 22, y0, 22, 18);
+          // Bagong Pilipinas is wider — keep aspect ratio relative to logoSize height
+          const aspect = (rightImg.naturalWidth || 110) / (rightImg.naturalHeight || 80);
+          const rW = logoSize * aspect;
+          doc.addImage(canvas.toDataURL('image/png'), 'PNG', pageW - margin - rW, logoY, rW, logoSize);
         }
       } catch(_) {}
 
@@ -1459,36 +1474,45 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7);
       doc.setTextColor(45, 71, 113);
-      doc.text('Republic of the Philippines', cx, y0 + 4, { align: 'center' });
+      doc.text('Republic of the Philippines', cx, y0 + 5, { align: 'center' });
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
       doc.setTextColor(27, 52, 87);
-      doc.text('Department of Migrant Workers', cx, y0 + 10, { align: 'center' });
+      doc.text('Department of Migrant Workers', cx, y0 + 11, { align: 'center' });
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(27, 52, 87);
-      doc.text('Regional Office - XIII (Caraga)', cx, y0 + 15.5, { align: 'center' });
+      doc.text('Regional Office - XIII (Caraga)', cx, y0 + 17, { align: 'center' });
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(6.5);
       doc.setTextColor(79, 100, 130);
       doc.text(
         '3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600',
-        cx, y0 + 19.5, { align: 'center' }
+        cx, y0 + 21.5, { align: 'center' }
       );
 
       // Title line
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(58, 95, 137);
-      doc.text(title, cx, y0 + 24, { align: 'center' });
+      doc.text(title, cx, y0 + 26, { align: 'center' });
 
-      // Separator line
+      // Month subtitle — "FOR THE MONTH OF MARCH" (monitoring only, when a month is filtered)
+      if (monitoringMonthSubtitle) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(58, 95, 137);
+        doc.text(monitoringMonthSubtitle, cx, y0 + 31, { align: 'center' });
+      }
+
+      // Separator line — pushed down when subtitle is present
+      const sepY = monitoringMonthSubtitle ? y0 + 33.5 : y0 + 28.5;
       doc.setDrawColor(213, 222, 234);
       doc.setLineWidth(0.4);
-      doc.line(margin, y0 + 26.5, pageW - margin, y0 + 26.5);
+      doc.line(margin, sepY, pageW - margin, sepY);
 
       // Page number (bottom right)
       doc.setFont('helvetica', 'normal');
@@ -1598,7 +1622,8 @@ async function exportTableToPdf(tableSelector, filename) {
       const jfPcts = [13,6,11,11,6,4,4,4,4,4,4,6,6,4,8];
       jfPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
     } else if (isMonitoringExport) {
-      const monPcts = [3,9,7,11,7,6,6,7,7,7,7,7,8,7];
+      // Percentages sum to exactly 100 so the table fills contentW with no right gap
+      const monPcts = [3,9,7,11,7,6,6,7,7,7,7,7,8,8];
       monPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
     }
 
