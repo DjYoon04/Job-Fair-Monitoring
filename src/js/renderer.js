@@ -1683,13 +1683,15 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('OIC-Assistant Regional Director', rightX, titleY);
       doc.text('and OIC- Chief Labor and Employment Officer', rightX, titleY + 4.5);
 
-      // ── Underline drawn just below each name ─────────────────────────────
-      // nameY is the text baseline; adding ~1.5mm clears descenders and sits
-      // the line cleanly underneath the bold name text.
+      // ── Underline drawn just below each name, sized to name width only ─────
+      // Use jsPDF's getTextWidth() which respects the current font/size setting
+      // (helvetica bold 9pt is still active here from the name text above).
       doc.setDrawColor(0, 0, 0);
       doc.setLineWidth(0.3);
-      doc.line(leftX, nameY + 1.5, leftX + colW, nameY + 1.5);
-      doc.line(rightX, nameY + 1.5, rightX + colW, nameY + 1.5);
+      const leftNameW  = doc.getTextWidth('AURORA JEAN A. TORRALBA');
+      const rightNameW = doc.getTextWidth('REGIENALD S. ESPALDON, CPA');
+      doc.line(leftX,  nameY + 1.5, leftX  + leftNameW,  nameY + 1.5);
+      doc.line(rightX, nameY + 1.5, rightX + rightNameW, nameY + 1.5);
     }
 
     // ── Replace placeholder page-count ──────────────────────────────────────
