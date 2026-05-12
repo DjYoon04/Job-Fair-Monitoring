@@ -1328,6 +1328,70 @@ function registerMonitoringHandlers() {
     await db.query('DELETE FROM monitoring_records WHERE id = $1', [id]);
     return { success: true };
   });
+
+  // ── File upload: server saves files to its local uploads directory ──────────
+  ipcMain.handle('monitoring:uploadEvidence', async (_, { filePaths, folder }) => {
+    const fs      = require('fs');
+    const path    = require('path');
+    const os      = require('os');
+    const UPLOAD_DIR = path.join(os.homedir(), 'job-fair-uploads');
+
+    const sub  = String(folder || '').replace(/\.\./g, '').trim();
+    const dest = sub ? path.join(UPLOAD_DIR, sub) : UPLOAD_DIR;
+    fs.mkdirSync(dest, { recursive: true });
+
+    const uploaded = [];
+    for (const src of (filePaths || [])) {
+      if (!src || !fs.existsSync(src)) continue;
+      const name    = path.basename(src);
+      const target  = path.join(dest, name);
+      fs.copyFileSync(src, target);
+      const stat = fs.statSync(target);
+      uploaded.push({ name, path: target, size: stat.size });
+    }
+    return { uploaded };
+  });
+
+  // ── List contents of an evidence folder ─────────────────────────────────────
+  ipcMain.handle('monitoring:listEvidence', async (_, targetPath) => {
+    const fs   = require('fs');
+    const path = require('path');
+    const os   = require('os');
+
+    const base   = path.join(os.homedir(), 'job-fair-uploads');
+    const target = String(targetPath || base).trim();
+
+    if (!fs.existsSync(target)) {
+      throw new Error('Path not found: ' + target);
+    }
+    const stat = fs.statSync(target);
+    if (!stat.isDirectory()) {
+      return [{ name: path.basename(target), path: target, isDir: false, size: stat.size }];
+    }
+    return fs.readdirSync(target).map((name) => {
+      const full = path.join(target, name);
+      const s    = fs.statSync(full);
+      return { name, path: full, isDir: s.isDirectory(), size: s.isDirectory() ? null : s.size };
+    });
+  });
+
+  // ── Download folder or multiple paths as ZIP (server role: just open locally)
+  ipcMain.handle('monitoring:downloadEvidenceZip', async (_, targetPath) => {
+    // On the server machine, we just open the folder/file directly
+    const errorMessage = await shell.openPath(String(targetPath || '').trim());
+    if (errorMessage) return { success: false, error: errorMessage };
+    return { success: true };
+  });
+
+  ipcMain.handle('monitoring:downloadBatchZip', async (_, paths) => {
+    // On the server machine, open each path individually
+    const results = [];
+    for (const p of (paths || [])) {
+      const errMsg = await shell.openPath(String(p || '').trim());
+      results.push({ path: p, success: !errMsg, error: errMsg || null });
+    }
+    return { results };
+  });
 }
 
 // ============================================================================

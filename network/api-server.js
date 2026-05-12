@@ -13,7 +13,12 @@
 
 const express    = require('express');
 const bodyParser = require('body-parser');
+const multer     = require('multer');
+const archiver   = require('archiver');
 const crypto     = require('crypto');
+const fs         = require('fs');
+const path       = require('path');
+const os         = require('os');
 const db         = require('../database/connection');
 const { getLocalIP } = require('./ip-detector');
 
@@ -61,7 +66,33 @@ function sessionToken(req) {
 // ─── build the Express app ───────────────────────────────────────────────────
 function buildApp() {
   const app = express();
-  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.json({ limit: '50mb' }));
+
+  // ── Multer: store uploaded files in <userData>/uploads on the server ────────
+  // The upload directory is placed in the OS temp folder under job-fair-uploads.
+  // In production you should point this at a stable persistent directory.
+  const UPLOAD_DIR = path.join(os.homedir(), 'job-fair-uploads');
+  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      // Preserve optional sub-folder sent by the client as ?folder=relative/path
+      const sub = String(req.query.folder || '').replace(/\.\./g, '').trim();
+      const dest = sub ? path.join(UPLOAD_DIR, sub) : UPLOAD_DIR;
+      fs.mkdirSync(dest, { recursive: true });
+      cb(null, dest);
+    },
+    filename: (req, file, cb) => {
+      // Keep original filename; prefix with timestamp to avoid collisions
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._\-() ]/g, '_');
+      cb(null, safe);
+    },
+  });
+
+  const upload = multer({
+    storage,
+    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB per file
+  });
 
   // Health check – clients use this to verify the server is reachable
   app.get('/health', (req, res) => {
@@ -538,6 +569,110 @@ function buildApp() {
   }));
 
   // ── Summaries ──────────────────────────────────────────────────────────────
+
+  // ── Evidence file upload (single or multiple) ──────────────────────────────
+  // POST /monitoring/evidence/upload?folder=optional/sub/path
+  // Body: multipart/form-data, field name "files" (multiple allowed)
+  // Returns: { ok: true, data: { uploaded: [{name, path, size}] } }
+  app.post('/monitoring/evidence/upload', upload.array('files', 100), wrap(async (req, res) => {
+    if (!req.files || req.files.length === 0) {
+      return err(res, 'No files received', 400);
+    }
+    const uploaded = req.files.map((f) => ({
+      name:         f.originalname,
+      savedName:    f.filename,
+      path:         f.path,
+      size:         f.size,
+      mimetype:     f.mimetype,
+    }));
+    console.log(`[API] Uploaded ${uploaded.length} file(s):`, uploaded.map(f => f.name).join(', '));
+    ok(res, { uploaded });
+  }));
+
+  // ── Evidence folder listing ─────────────────────────────────────────────────
+  // GET /monitoring/evidence/list?path=server/folder/path
+  // Returns an array of { name, path, isDir, size } entries (one level deep)
+  app.get('/monitoring/evidence/list', wrap(async (req, res) => {
+    const target = String(req.query.path || UPLOAD_DIR).trim();
+    if (!fs.existsSync(target)) {
+      return err(res, 'Path not found: ' + target, 404);
+    }
+    const stat = fs.statSync(target);
+    if (!stat.isDirectory()) {
+      // Single file — return it as a one-element list
+      return ok(res, [{ name: path.basename(target), path: target, isDir: false, size: stat.size }]);
+    }
+    const entries = fs.readdirSync(target).map((name) => {
+      const full = path.join(target, name);
+      const s    = fs.statSync(full);
+      return { name, path: full, isDir: s.isDirectory(), size: s.isDirectory() ? null : s.size };
+    });
+    ok(res, entries);
+  }));
+
+  // ── Evidence folder ZIP download ────────────────────────────────────────────
+  // GET /monitoring/evidence/zip?path=server/folder/path
+  // Streams a ZIP of the entire folder (all files, recursively)
+  app.get('/monitoring/evidence/zip', (req, res) => {
+    const target = String(req.query.path || '').trim();
+    if (!target) return res.status(400).json({ ok: false, error: 'No path specified' });
+    if (!fs.existsSync(target)) return res.status(404).json({ ok: false, error: 'Path not found: ' + target });
+
+    const stat = fs.statSync(target);
+    const zipName = encodeURIComponent(path.basename(target) + '.zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Content-Type', 'application/zip');
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (e) => {
+      console.error('[API] ZIP error:', e.message);
+      if (!res.headersSent) res.status(500).json({ ok: false, error: e.message });
+    });
+    archive.pipe(res);
+
+    if (stat.isDirectory()) {
+      archive.directory(target, path.basename(target));
+    } else {
+      archive.file(target, { name: path.basename(target) });
+    }
+    archive.finalize();
+  });
+
+  // ── Evidence multi-file batch download ─────────────────────────────────────
+  // POST /monitoring/evidence/batch-zip
+  // Body: { paths: ["/abs/path/a", "/abs/path/b", ...] }
+  // Streams a ZIP containing all requested files/folders
+  app.post('/monitoring/evidence/batch-zip', (req, res) => {
+    const paths = req.body?.paths;
+    if (!Array.isArray(paths) || paths.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No paths provided' });
+    }
+
+    res.setHeader('Content-Disposition', 'attachment; filename="evidence-files.zip"');
+    res.setHeader('Content-Type', 'application/zip');
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (e) => {
+      console.error('[API] Batch ZIP error:', e.message);
+      if (!res.headersSent) res.status(500).json({ ok: false, error: e.message });
+    });
+    archive.pipe(res);
+
+    for (const p of paths) {
+      const target = String(p || '').trim();
+      if (!target || !fs.existsSync(target)) {
+        console.warn('[API] Batch ZIP: skipping missing path:', target);
+        continue;
+      }
+      const s = fs.statSync(target);
+      if (s.isDirectory()) {
+        archive.directory(target, path.basename(target));
+      } else {
+        archive.file(target, { name: path.basename(target) });
+      }
+    }
+    archive.finalize();
+  });
 
   // Evidence file serving: streams a server-side file to the client as a binary download.
   app.get('/monitoring/evidence/stream', (req, res) => {
