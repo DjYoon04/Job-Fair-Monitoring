@@ -168,13 +168,40 @@ const deleteMonitoring     = (id)   => del(`/monitoring/${id}`);
 const pickMonitoringEvidencePath = () => Promise.resolve({ canceled: true, paths: [] });
 
 /**
- * On a client PC, fetch the file from the server and open it locally
- * by writing it to a temp file and opening with the OS default app.
+ * On a client PC, open a server-side file or folder.
+ *
+ * - File  → fetch via /monitoring/evidence/stream, write to a temp file, open locally.
+ * - Folder → request a ZIP from the server via /monitoring/evidence/zip, save to temp,
+ *            open locally (user gets a .zip they can extract).
+ *
+ * The distinction is made by asking the server to list the path first; if the result
+ * has isDir=true (or the stream endpoint rejects it as a directory) we fall back to
+ * the ZIP download path.
  */
-function openMonitoringEvidencePath(targetPath) {
-  return new Promise((resolve) => {
-    if (!_baseUrl) return resolve({ success: false, error: 'API client not configured.' });
+async function openMonitoringEvidencePath(targetPath) {
+  if (!_baseUrl) return { success: false, error: 'API client not configured.' };
 
+  // ── Step 1: ask the server whether this path is a file or a folder ──────────
+  // The list endpoint returns { isRootDir, entries } — isRootDir=true means
+  // the queried path is itself a directory, regardless of how many items it contains.
+  let isDirectory = false;
+  try {
+    const result = await listEvidencePath(targetPath);
+    if (result && result.isRootDir === true) {
+      isDirectory = true;
+    }
+  } catch {
+    // If listing fails, fall through and try the stream endpoint; it will surface
+    // its own error if the path doesn't exist.
+  }
+
+  // ── Step 2a: folder → download as ZIP ───────────────────────────────────────
+  if (isDirectory) {
+    return downloadEvidenceZip(targetPath);
+  }
+
+  // ── Step 2b: file → stream and open locally ──────────────────────────────────
+  return new Promise((resolve) => {
     const url       = _baseUrl + '/monitoring/evidence/stream?path=' + encodeURIComponent(targetPath);
     const urlParsed = new URL(url);
     const options   = {
@@ -182,6 +209,7 @@ function openMonitoringEvidencePath(targetPath) {
       port:     parseInt(urlParsed.port, 10),
       path:     urlParsed.pathname + urlParsed.search,
       method:   'GET',
+      headers:  _sessionTok ? { 'X-Session-Token': _sessionTok } : {},
     };
 
     const req = http.request(options, (res) => {
@@ -199,16 +227,12 @@ function openMonitoringEvidencePath(targetPath) {
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', async () => {
         try {
-          const os   = require('os');
-          const fs   = require('fs');
-          const path = require('path');
           const { shell } = require('electron');
-
-          const buffer   = Buffer.concat(chunks);
-          const cd       = res.headers['content-disposition'] || '';
-          const match    = cd.match(/filename="([^"]+)"/);
-          const filename = match ? decodeURIComponent(match[1]) : path.basename(targetPath);
-          const tmpPath  = path.join(os.tmpdir(), filename);
+          const buffer    = Buffer.concat(chunks);
+          const cd        = res.headers['content-disposition'] || '';
+          const match     = cd.match(/filename="([^"]+)"/);
+          const filename  = match ? decodeURIComponent(match[1]) : path.basename(targetPath);
+          const tmpPath   = path.join(os.tmpdir(), filename);
 
           fs.writeFileSync(tmpPath, buffer);
           const error = await shell.openPath(tmpPath);
@@ -292,6 +316,11 @@ function uploadEvidenceFiles(filePaths, folder = '') {
  * List files/folders at a server-side path.
  * @param {string} serverPath
  * @returns {Promise<{name,path,isDir,size}[]>}
+ */
+/**
+ * List files/folders at a server-side path.
+ * Returns { isRootDir: bool, entries: [{name, path, isDir, size}] }
+ * @param {string} serverPath
  */
 const listEvidencePath = (serverPath) =>
   get('/monitoring/evidence/list?path=' + encodeURIComponent(serverPath));

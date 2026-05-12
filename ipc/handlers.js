@@ -1353,6 +1353,9 @@ function registerMonitoringHandlers() {
   });
 
   // ── List contents of an evidence folder ─────────────────────────────────────
+  // Returns { isRootDir: bool, entries: [{name, path, isDir, size}] }
+  // Matches the shape returned by the HTTP /monitoring/evidence/list endpoint
+  // so renderer code works the same way regardless of role (server IPC or client HTTP).
   ipcMain.handle('monitoring:listEvidence', async (_, targetPath) => {
     const fs   = require('fs');
     const path = require('path');
@@ -1366,13 +1369,17 @@ function registerMonitoringHandlers() {
     }
     const stat = fs.statSync(target);
     if (!stat.isDirectory()) {
-      return [{ name: path.basename(target), path: target, isDir: false, size: stat.size }];
+      return {
+        isRootDir: false,
+        entries: [{ name: path.basename(target), path: target, isDir: false, size: stat.size }],
+      };
     }
-    return fs.readdirSync(target).map((name) => {
+    const entries = fs.readdirSync(target).map((name) => {
       const full = path.join(target, name);
       const s    = fs.statSync(full);
       return { name, path: full, isDir: s.isDirectory(), size: s.isDirectory() ? null : s.size };
     });
+    return { isRootDir: true, entries };
   });
 
   // ── Download folder or multiple paths as ZIP (server role: just open locally)

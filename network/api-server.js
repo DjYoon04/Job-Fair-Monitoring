@@ -606,7 +606,9 @@ function buildApp() {
 
   // ── Evidence folder listing ─────────────────────────────────────────────────
   // GET /monitoring/evidence/list?path=server/folder/path
-  // Returns an array of { name, path, isDir, size } entries (one level deep)
+  // Returns { isRootDir: bool, entries: [{ name, path, isDir, size }] }
+  // isRootDir=true  → the queried path is itself a directory (entries = its contents)
+  // isRootDir=false → the queried path is a single file   (entries = [that file])
   app.get('/monitoring/evidence/list', wrap(async (req, res) => {
     const target = String(req.query.path || UPLOAD_DIR).trim();
     if (!fs.existsSync(target)) {
@@ -614,15 +616,18 @@ function buildApp() {
     }
     const stat = fs.statSync(target);
     if (!stat.isDirectory()) {
-      // Single file — return it as a one-element list
-      return ok(res, [{ name: path.basename(target), path: target, isDir: false, size: stat.size }]);
+      // Single file — isRootDir=false so callers can distinguish from a 1-item folder
+      return ok(res, {
+        isRootDir: false,
+        entries: [{ name: path.basename(target), path: target, isDir: false, size: stat.size }],
+      });
     }
     const entries = fs.readdirSync(target).map((name) => {
       const full = path.join(target, name);
       const s    = fs.statSync(full);
       return { name, path: full, isDir: s.isDirectory(), size: s.isDirectory() ? null : s.size };
     });
-    ok(res, entries);
+    ok(res, { isRootDir: true, entries });
   }));
 
   // ── Evidence folder ZIP download ────────────────────────────────────────────
