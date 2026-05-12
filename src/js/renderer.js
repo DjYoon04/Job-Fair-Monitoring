@@ -1674,7 +1674,7 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('REGIENALD S. ESPALDON, CPA', rightX, nameY);
 
       // ── Titles (italic, just below names) ────────────────────────────────
-      const titleY = nameY + 5;
+      const titleY = nameY + 5.5;   // clear the underline at nameY + 1.5
 
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7.5);
@@ -1683,11 +1683,13 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('OIC-Assistant Regional Director', rightX, titleY);
       doc.text('and OIC- Chief Labor and Employment Officer', rightX, titleY + 4.5);
 
-      // ── Thin separator lines under each name (signature lines) ────────────
+      // ── Underline drawn just below each name ─────────────────────────────
+      // nameY is the text baseline; adding ~1.5mm clears descenders and sits
+      // the line cleanly underneath the bold name text.
       doc.setDrawColor(0, 0, 0);
       doc.setLineWidth(0.3);
-      doc.line(leftX, nameY - 1.5, leftX + colW, nameY - 1.5);
-      doc.line(rightX, nameY - 1.5, rightX + colW, nameY - 1.5);
+      doc.line(leftX, nameY + 1.5, leftX + colW, nameY + 1.5);
+      doc.line(rightX, nameY + 1.5, rightX + colW, nameY + 1.5);
     }
 
     // ── Replace placeholder page-count ──────────────────────────────────────
