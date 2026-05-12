@@ -1635,6 +1635,61 @@ async function exportTableToPdf(tableSelector, filename) {
       },
     });
 
+    // ── Signature block (monitoring export — last page only) ────────────────
+    if (isMonitoringExport) {
+      const totalPagesBeforeSig = doc.internal.getNumberOfPages();
+      doc.setPage(totalPagesBeforeSig);
+
+      const tableEndY  = doc.lastAutoTable.finalY;
+      const sigH       = 38;   // height of the entire signature block in mm
+      const footerZone = 12;   // mm reserved for footer at bottom of page
+      const availableY = pageH - footerZone - sigH;
+
+      // If table ends too close to the footer, start the sig block on a fresh page
+      let sigY = tableEndY + 8;
+      if (sigY > availableY) {
+        doc.addPage();
+        drawHeader(doc, doc.internal.getNumberOfPages(), '{TOTAL}');
+        sigY = margin + 28 + 8;   // below letterhead on the new page
+      }
+
+      const leftX   = margin;
+      const rightX  = pageW / 2 + 4;   // right column starts at centre + small gap
+      const colW    = pageW / 2 - margin - 4;
+
+      // ── Labels row ─────────────────────────────────────────────────────────
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(40, 40, 40);
+      doc.text('Prepared by:', leftX, sigY);
+      doc.text('Reviewed By:', rightX, sigY);
+
+      // ── Name lines (bold, ~14mm below label) ──────────────────────────────
+      const nameY = sigY + 14;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      doc.text('AURORA JEAN A. TORRALBA', leftX, nameY);
+      doc.text('REGIENALD S. ESPALDON, CPA', rightX, nameY);
+
+      // ── Titles (italic, just below names) ────────────────────────────────
+      const titleY = nameY + 5;
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.5);
+      doc.setTextColor(60, 60, 60);
+      doc.text('Labor and Employment Officer I', leftX, titleY);
+      doc.text('OIC-Assistant Regional Director', rightX, titleY);
+      doc.text('and OIC- Chief Labor and Employment Officer', rightX, titleY + 4.5);
+
+      // ── Thin separator lines under each name (signature lines) ────────────
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+      doc.line(leftX, nameY - 1.5, leftX + colW, nameY - 1.5);
+      doc.line(rightX, nameY - 1.5, rightX + colW, nameY - 1.5);
+    }
+
     // ── Replace placeholder page-count ──────────────────────────────────────
     // autoTable fires didDrawPage as pages are created; we don't know total until done.
     // Patch all pages afterwards.
