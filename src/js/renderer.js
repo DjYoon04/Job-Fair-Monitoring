@@ -1664,34 +1664,25 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('Prepared by:', leftX, sigY);
       doc.text('Reviewed By:', rightX, sigY);
 
-      // ── Name lines (bold, ~14mm below label) ──────────────────────────────
+      // ── Name lines (bold + underline, ~14mm below label) ─────────────────
       const nameY = sigY + 14;
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(0, 0, 0);
-      doc.text('AURORA JEAN A. TORRALBA', leftX, nameY);
-      doc.text('REGIENALD S. ESPALDON, CPA', rightX, nameY);
+      // jsPDF 2.x native underline — perfectly tracks the actual rendered text width
+      doc.text('AURORA JEAN A. TORRALBA',    leftX,  nameY, { baseline: 'alphabetic', underline: true });
+      doc.text('REGIENALD S. ESPALDON, CPA', rightX, nameY, { baseline: 'alphabetic', underline: true });
 
       // ── Titles (italic, just below names) ────────────────────────────────
-      const titleY = nameY + 5.5;   // clear the underline at nameY + 1.5
+      const titleY = nameY + 5;
 
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7.5);
       doc.setTextColor(60, 60, 60);
-      doc.text('Labor and Employment Officer I', leftX, titleY);
-      doc.text('OIC-Assistant Regional Director', rightX, titleY);
+      doc.text('Labor and Employment Officer I',              leftX,  titleY);
+      doc.text('OIC-Assistant Regional Director',             rightX, titleY);
       doc.text('and OIC- Chief Labor and Employment Officer', rightX, titleY + 4.5);
-
-      // ── Underline drawn just below each name, sized to name width only ─────
-      // Use jsPDF's getTextWidth() which respects the current font/size setting
-      // (helvetica bold 9pt is still active here from the name text above).
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.3);
-      const leftNameW  = doc.getTextWidth('AURORA JEAN A. TORRALBA');
-      const rightNameW = doc.getTextWidth('REGIENALD S. ESPALDON, CPA');
-      doc.line(leftX,  nameY + 1.5, leftX  + leftNameW,  nameY + 1.5);
-      doc.line(rightX, nameY + 1.5, rightX + rightNameW, nameY + 1.5);
     }
 
     // ── Replace placeholder page-count ──────────────────────────────────────
