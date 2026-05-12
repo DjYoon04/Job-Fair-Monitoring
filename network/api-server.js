@@ -235,10 +235,11 @@ function buildApp() {
   app.get('/jfa', wrap(async (req, res) => {
     const f = req.query;
     let where = 'WHERE 1=1'; const params = []; let idx = 1;
-    if (f.fiscal_year) { where += ` AND j.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
-    if (f.month)       { where += ` AND j.month=$${idx++}`;       params.push(f.month); }
-    if (f.status)      { where += ` AND j.status=$${idx++}`;      params.push(f.status); }
-    if (f.agency_id)   { where += ` AND j.agency_id=$${idx++}`;   params.push(f.agency_id); }
+    const valid = (v) => v && v !== 'undefined' && v !== 'null';
+    if (valid(f.fiscal_year)) { where += ` AND j.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
+    if (valid(f.month))       { where += ` AND j.month=$${idx++}`;       params.push(f.month); }
+    if (valid(f.status))      { where += ` AND j.status=$${idx++}`;      params.push(f.status); }
+    if (valid(f.agency_id))   { where += ` AND j.agency_id=$${idx++}`;   params.push(f.agency_id); }
     const r = await db.query(
       `SELECT j.*, a.agency_name, a.agency_type, v.venue_name,
               d.invitation_letter_date, d.affidavit_date, d.job_orders_date,
@@ -257,8 +258,9 @@ function buildApp() {
   app.get('/jfa/document-status', wrap(async (req, res) => {
     const f = req.query;
     let where = 'WHERE 1=1'; const params = []; let idx = 1;
-    if (f.fiscal_year) { where += ` AND fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
-    if (f.month)       { where += ` AND month=$${idx++}`;       params.push(f.month); }
+    const valid = (v) => v && v !== 'undefined' && v !== 'null';
+    if (valid(f.fiscal_year)) { where += ` AND fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
+    if (valid(f.month))       { where += ` AND month=$${idx++}`;       params.push(f.month); }
     const r = await db.query(
       `SELECT * FROM v_jfa_document_status ${where} ORDER BY fiscal_year DESC, month, jfa_no`, params
     );
@@ -344,8 +346,9 @@ function buildApp() {
   app.get('/jobfair', wrap(async (req, res) => {
     const f = req.query;
     let where = 'WHERE 1=1'; const params = []; let idx = 1;
-    if (f.fiscal_year) { where += ` AND e.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
-    if (f.month)       { where += ` AND e.month=$${idx++}`;       params.push(f.month); }
+    const valid = (v) => v && v !== 'undefined' && v !== 'null';
+    if (valid(f.fiscal_year)) { where += ` AND e.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
+    if (valid(f.month))       { where += ` AND e.month=$${idx++}`;       params.push(f.month); }
     const r = await db.query(
       `SELECT e.*, org.agency_name AS organizer_name, v.venue_name,
               COALESCE(SUM(p.registered_applicants_male),0) AS total_male,
@@ -469,15 +472,16 @@ function buildApp() {
   app.get('/monitoring', wrap(async (req, res) => {
     const f = req.query;
     let where = 'WHERE 1=1'; const params = []; let idx = 1;
-    if (f.fiscal_year) { where += ` AND m.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
-    if (f.month)       { where += ` AND m.month=$${idx++}`;       params.push(f.month); }
+    const valid = (v) => v && v !== 'undefined' && v !== 'null';
+    if (valid(f.fiscal_year)) { where += ` AND m.fiscal_year=$${idx++}`; params.push(f.fiscal_year); }
+    if (valid(f.month))       { where += ` AND m.month=$${idx++}`;       params.push(f.month); }
     const r = await db.query(
       `SELECT m.*, a.agency_name, v.venue_name
        FROM monitoring_records m
-       LEFT JOIN agencies a ON m.agency_id = a.id
+       LEFT JOIN agencies a ON m.implementing_agency_id = a.id
        LEFT JOIN venues v ON m.venue_id = v.id
        ${where}
-       ORDER BY m.fiscal_year DESC, m.month DESC, m.monitoring_date DESC`, params
+       ORDER BY m.fiscal_year DESC, m.month DESC, m.job_fair_date_start DESC`, params
     );
     ok(res, r.rows);
   }));
@@ -486,7 +490,7 @@ function buildApp() {
     const r = await db.query(
       `SELECT m.*, a.agency_name, v.venue_name
        FROM monitoring_records m
-       LEFT JOIN agencies a ON m.agency_id = a.id
+       LEFT JOIN agencies a ON m.implementing_agency_id = a.id
        LEFT JOIN venues v ON m.venue_id = v.id
        WHERE m.id=$1`, [req.params.id]
     );
@@ -533,8 +537,9 @@ function buildApp() {
     ok(res, { success: true });
   }));
 
+  // ── Summaries ──────────────────────────────────────────────────────────────
+
   // Evidence file serving: streams a server-side file to the client as a binary download.
-  // The client receives the blob and opens it locally with a temporary object URL.
   app.get('/monitoring/evidence/stream', (req, res) => {
     const fs   = require('fs');
     const path = require('path');
@@ -564,9 +569,6 @@ function buildApp() {
     stream.pipe(res);
   });
 
-
-
-  // ── Summaries ──────────────────────────────────────────────────────────────
   app.get('/summary/jfa', wrap(async (req, res) => {
     const { handleJfaSummary } = getHandlers();
     ok(res, await handleJfaSummary(req.query.year));

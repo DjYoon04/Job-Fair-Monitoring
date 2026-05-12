@@ -165,16 +165,15 @@ const pickMonitoringEvidencePath = () => Promise.resolve({ canceled: true, paths
 
 /**
  * On a client PC, fetch the file from the server and open it locally
- * by writing it to a temp file via the Electron shell.
- * Falls back to opening a blob URL in the default browser if shell is unavailable.
+ * by writing it to a temp file and opening with the OS default app.
  */
 function openMonitoringEvidencePath(targetPath) {
   return new Promise((resolve) => {
     if (!_baseUrl) return resolve({ success: false, error: 'API client not configured.' });
 
-    const url = _baseUrl + '/monitoring/evidence/stream?path=' + encodeURIComponent(targetPath);
+    const url       = _baseUrl + '/monitoring/evidence/stream?path=' + encodeURIComponent(targetPath);
     const urlParsed = new URL(url);
-    const options = {
+    const options   = {
       hostname: urlParsed.hostname,
       port:     parseInt(urlParsed.port, 10),
       path:     urlParsed.pathname + urlParsed.search,
@@ -186,17 +185,12 @@ function openMonitoringEvidencePath(targetPath) {
         let raw = '';
         res.on('data', c => { raw += c; });
         res.on('end', () => {
-          try {
-            const parsed = JSON.parse(raw);
-            resolve({ success: false, error: parsed.error || 'Server error' });
-          } catch {
-            resolve({ success: false, error: `HTTP ${res.statusCode}` });
-          }
+          try { resolve({ success: false, error: JSON.parse(raw).error || ('HTTP ' + res.statusCode) }); }
+          catch { resolve({ success: false, error: 'HTTP ' + res.statusCode }); }
         });
         return;
       }
 
-      // Collect the binary response into a Buffer
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', async () => {
@@ -207,7 +201,6 @@ function openMonitoringEvidencePath(targetPath) {
           const { shell } = require('electron');
 
           const buffer   = Buffer.concat(chunks);
-          // Extract filename from Content-Disposition or fallback to path basename
           const cd       = res.headers['content-disposition'] || '';
           const match    = cd.match(/filename="([^"]+)"/);
           const filename = match ? decodeURIComponent(match[1]) : path.basename(targetPath);
@@ -215,11 +208,7 @@ function openMonitoringEvidencePath(targetPath) {
 
           fs.writeFileSync(tmpPath, buffer);
           const error = await shell.openPath(tmpPath);
-          if (error) {
-            resolve({ success: false, error });
-          } else {
-            resolve({ success: true });
-          }
+          resolve(error ? { success: false, error } : { success: true });
         } catch (e) {
           resolve({ success: false, error: e.message });
         }
