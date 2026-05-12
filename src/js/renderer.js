@@ -3952,13 +3952,20 @@ function renderMonitoringEvidenceLinks(evidencePath) {
 
   if (!paths.length) return '-';
 
-  return paths.map((pathValue) => {
+  const links = paths.map((pathValue) => {
     const normalized = pathValue.replace(/[\\/]+$/, '');
-    const parts = normalized.split(/[\\/]/).filter(Boolean);
+    const parts = normalized.split(/[\/\\]/).filter(Boolean);
     const displayName = parts.length ? parts[parts.length - 1] : pathValue;
     const encodedPath = encodeURIComponent(pathValue);
     return `<button type="button" class="mon-evidence-link" data-path="${encodedPath}" title="${pathValue}">${displayName}</button>`;
   }).join('<br>');
+
+  // If there are multiple paths, add a "Download All" button
+  const downloadAll = paths.length > 1
+    ? `<br><button type="button" class="mon-evidence-download-all btn-sm" data-paths="${encodeURIComponent(JSON.stringify(paths))}" title="Download all as ZIP">⬇ Download All</button>`
+    : '';
+
+  return links + downloadAll;
 }
 
 async function loadMonitoring() {
@@ -4010,22 +4017,66 @@ async function loadMonitoring() {
         const targetPath = decodeURIComponent(encoded);
         if (!targetPath) return;
 
+        btn.disabled = true;
+        const origText = btn.textContent;
+        btn.textContent = '⏳ Opening…';
+
         try {
+          // First try normal open (works on server machine for files)
           const result = await window.api.openMonitoringEvidencePath(targetPath);
           if (!result?.success) {
-            const msg = result?.error || 'Unable to open evidence file';
-            if (msg.includes('directory') || msg.includes('folder')) {
-              showToast('Evidence path is a folder — only individual files can be opened remotely.', 'warning');
-            } else if (msg.includes('not found') || msg.includes('File not found')) {
-              showToast('Evidence file not found on the server. It may have been moved or deleted.', 'error');
+            const msg = result?.error || 'Unable to open evidence';
+            // If it's a folder or remote path, download as ZIP instead
+            if (msg.includes('directory') || msg.includes('folder') || msg.includes('not found')) {
+              showToast('Downloading folder as ZIP…', 'info');
+              const zipResult = await window.api.downloadEvidenceZip(targetPath);
+              if (zipResult?.success) {
+                showToast('Folder downloaded and opened.', 'success');
+              } else {
+                showToast('Download failed: ' + (zipResult?.error || msg), 'error');
+              }
             } else {
-              showToast('Unable to open evidence file: ' + msg, 'error');
+              showToast('Unable to open evidence: ' + msg, 'error');
             }
           } else {
-            showToast('Evidence file downloaded and opened.', 'success');
+            showToast('Evidence opened.', 'success');
           }
         } catch (err) {
-          showToast('Unable to open evidence path: ' + err.message, 'error');
+          showToast('Unable to open evidence: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+      });
+    });
+
+    // Download All button — batches multiple paths into one ZIP
+    document.querySelectorAll('.mon-evidence-download-all').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const paths = JSON.parse(decodeURIComponent(btn.dataset.paths || '[]'));
+          if (!paths.length) return;
+          btn.disabled = true;
+          btn.textContent = '⏳ Zipping…';
+          const result = await window.api.downloadBatchZip(paths);
+          if (result?.success) {
+            showToast('All files downloaded as ZIP.', 'success');
+          } else if (result?.results) {
+            // Server role: individual opens
+            const failed = result.results.filter(r => !r.success);
+            if (failed.length) {
+              showToast(`Opened files with ${failed.length} error(s).`, 'warning');
+            } else {
+              showToast('All evidence files opened.', 'success');
+            }
+          } else {
+            showToast('Batch download failed: ' + (result?.error || 'Unknown error'), 'error');
+          }
+        } catch (err) {
+          showToast('Batch download failed: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '⬇ Download All';
         }
       });
     });
@@ -4275,16 +4326,29 @@ async function openMonitoringForm(id = null) {
   // Helper function to process dropped files/folders
   const processDroppedFiles = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
-    
+
+    const filePaths = Array.from(fileList).map(f => f.path).filter(Boolean);
+    if (!filePaths.length) {
+      showToast('No valid file paths found. Make sure you are dropping local files.', 'warning');
+      return;
+    }
+
+    const hint = dropZone.querySelector('div');
+    if (hint) { hint.innerHTML = '<span style="color:#0066cc;">⏳ Uploading…</span>'; hint.style.display = 'block'; }
+
     try {
-      // Collect file paths
-      const paths = [];
-      for (let file of fileList) {
-        paths.push(file.path);
+      const result = await window.api.uploadEvidenceFiles({ filePaths, folder: '' });
+      if (!result?.uploaded?.length) {
+        showToast('Upload returned no files.', 'warning');
+        if (hint) hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>';
+        return;
       }
-      updateEvidencePath(paths);
+      const serverPaths = result.uploaded.map(u => u.path);
+      updateEvidencePath(serverPaths);
+      showToast(`Uploaded ${result.uploaded.length} file(s) to server.`, 'success');
     } catch (err) {
-      showToast('Failed to process files: ' + err.message, 'error');
+      showToast('Upload failed: ' + err.message, 'error');
+      if (hint) hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>';
     }
   };
 
@@ -4326,7 +4390,23 @@ async function openMonitoringForm(id = null) {
         if (!result || result.canceled || !Array.isArray(result.paths) || result.paths.length === 0) {
           return;
         }
-        updateEvidencePath(result.paths);
+        // Upload picked files to server
+        const hint = dropZone.querySelector('div');
+        if (hint) { hint.innerHTML = '<span style="color:#0066cc;">⏳ Uploading…</span>'; hint.style.display = 'block'; }
+        try {
+          const upResult = await window.api.uploadEvidenceFiles({ filePaths: result.paths, folder: '' });
+          if (upResult?.uploaded?.length) {
+            updateEvidencePath(upResult.uploaded.map(u => u.path));
+            showToast(`Uploaded ${upResult.uploaded.length} file(s) to server.`, 'success');
+          } else {
+            // Fallback: store local paths if upload not available (server role same machine)
+            updateEvidencePath(result.paths);
+          }
+        } catch (uploadErr) {
+          // If upload IPC not available, fall back to local paths
+          updateEvidencePath(result.paths);
+        }
+        if (hint && !hint.style.display.includes('none')) { hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>'; }
       } catch (err) {
         showToast('Failed to pick files/folders: ' + err.message, 'error');
       }

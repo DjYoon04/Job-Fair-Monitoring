@@ -6,7 +6,11 @@
 
 'use strict';
 
-const http = require('http');
+const http   = require('http');
+const fs     = require('fs');
+const path   = require('path');
+const os     = require('os');
+const crypto = require('crypto');
 
 let _baseUrl    = null;   // e.g.  http://192.168.1.10:3721
 let _sessionTok = null;   // stored after login
@@ -220,7 +224,189 @@ function openMonitoringEvidencePath(targetPath) {
   });
 }
 
-// ─── summaries ────────────────────────────────────────────────────────────────
+// ─── evidence file upload ──────────────────────────────────────────────────────
+/**
+ * Upload one or more local file paths to the server.
+ * Files are sent as multipart/form-data.
+ * @param {string[]} filePaths  - Absolute local paths of files to upload
+ * @param {string}   [folder]   - Optional server-side sub-folder (relative, safe)
+ * @returns {Promise<{uploaded: {name,path,size}[]}>}
+ */
+function uploadEvidenceFiles(filePaths, folder = '') {
+  return new Promise((resolve, reject) => {
+    if (!_baseUrl) return reject(new Error('API client not configured.'));
+    if (!filePaths || filePaths.length === 0) return reject(new Error('No files to upload.'));
+
+    const boundary = '----FormBoundary' + crypto.randomBytes(16).toString('hex');
+    const urlPath  = '/monitoring/evidence/upload' + (folder ? `?folder=${encodeURIComponent(folder)}` : '');
+    const urlParsed = new URL(_baseUrl + urlPath);
+
+    // Build multipart body in memory (files only — suitable for evidence docs, not huge videos)
+    const parts = [];
+    for (const fp of filePaths) {
+      const name = path.basename(fp);
+      const data = fs.readFileSync(fp);
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\n` +
+          `Content-Type: application/octet-stream\r\n\r\n`
+        ),
+        data,
+        Buffer.from('\r\n')
+      );
+    }
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+    const body = Buffer.concat(parts);
+
+    const options = {
+      hostname: urlParsed.hostname,
+      port:     parseInt(urlParsed.port, 10),
+      path:     urlParsed.pathname + urlParsed.search,
+      method:   'POST',
+      headers: {
+        'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+        ...(_sessionTok ? { 'X-Session-Token': _sessionTok } : {}),
+      },
+    };
+
+    const req = http.request(options, (res) => {
+      let raw = '';
+      res.setEncoding('utf8');
+      res.on('data', c => { raw += c; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw);
+          if (!parsed.ok) return reject(new Error(parsed.error || 'Upload failed'));
+          resolve(parsed.data);
+        } catch { reject(new Error('Invalid JSON from server')); }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * List files/folders at a server-side path.
+ * @param {string} serverPath
+ * @returns {Promise<{name,path,isDir,size}[]>}
+ */
+const listEvidencePath = (serverPath) =>
+  get('/monitoring/evidence/list?path=' + encodeURIComponent(serverPath));
+
+/**
+ * Download a server-side file or folder as a ZIP and save to a local temp file.
+ * Then opens the file with the OS default application.
+ * @param {string} serverPath
+ * @returns {Promise<{success:boolean, localPath?:string, error?:string}>}
+ */
+function downloadEvidenceZip(serverPath) {
+  return new Promise((resolve) => {
+    if (!_baseUrl) return resolve({ success: false, error: 'API client not configured.' });
+
+    const url       = _baseUrl + '/monitoring/evidence/zip?path=' + encodeURIComponent(serverPath);
+    const urlParsed = new URL(url);
+    const options   = {
+      hostname: urlParsed.hostname,
+      port:     parseInt(urlParsed.port, 10),
+      path:     urlParsed.pathname + urlParsed.search,
+      method:   'GET',
+      headers: _sessionTok ? { 'X-Session-Token': _sessionTok } : {},
+    };
+
+    const req = http.request(options, (res) => {
+      if (res.statusCode !== 200) {
+        let raw = '';
+        res.on('data', c => { raw += c; });
+        res.on('end', () => {
+          try { resolve({ success: false, error: JSON.parse(raw).error || 'HTTP ' + res.statusCode }); }
+          catch { resolve({ success: false, error: 'HTTP ' + res.statusCode }); }
+        });
+        return;
+      }
+
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', async () => {
+        try {
+          const { shell } = require('electron');
+          const buffer    = Buffer.concat(chunks);
+          const cd        = res.headers['content-disposition'] || '';
+          const match     = cd.match(/filename="([^"]+)"/);
+          const filename  = match ? decodeURIComponent(match[1]) : path.basename(serverPath) + '.zip';
+          const tmpPath   = path.join(os.tmpdir(), filename);
+
+          fs.writeFileSync(tmpPath, buffer);
+          const openErr = await shell.openPath(tmpPath);
+          resolve(openErr ? { success: false, error: openErr } : { success: true, localPath: tmpPath });
+        } catch (e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ success: false, error: e.message }));
+    req.end();
+  });
+}
+
+/**
+ * Batch-download multiple server-side paths as a single ZIP file.
+ * @param {string[]} serverPaths
+ * @returns {Promise<{success:boolean, localPath?:string, error?:string}>}
+ */
+function downloadBatchZip(serverPaths) {
+  return new Promise((resolve) => {
+    if (!_baseUrl) return resolve({ success: false, error: 'API client not configured.' });
+
+    const payload    = JSON.stringify({ paths: serverPaths });
+    const urlParsed  = new URL(_baseUrl + '/monitoring/evidence/batch-zip');
+    const options    = {
+      hostname: urlParsed.hostname,
+      port:     parseInt(urlParsed.port, 10),
+      path:     urlParsed.pathname,
+      method:   'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        ...(_sessionTok ? { 'X-Session-Token': _sessionTok } : {}),
+      },
+    };
+
+    const req = http.request(options, (res) => {
+      if (res.statusCode !== 200) {
+        let raw = '';
+        res.on('data', c => { raw += c; });
+        res.on('end', () => {
+          try { resolve({ success: false, error: JSON.parse(raw).error || 'HTTP ' + res.statusCode }); }
+          catch { resolve({ success: false, error: 'HTTP ' + res.statusCode }); }
+        });
+        return;
+      }
+
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', async () => {
+        try {
+          const { shell } = require('electron');
+          const buffer    = Buffer.concat(chunks);
+          const tmpPath   = path.join(os.tmpdir(), 'evidence-files.zip');
+          fs.writeFileSync(tmpPath, buffer);
+          const openErr = await shell.openPath(tmpPath);
+          resolve(openErr ? { success: false, error: openErr } : { success: true, localPath: tmpPath });
+        } catch (e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ success: false, error: e.message }));
+    req.write(payload);
+    req.end();
+  });
+}
+
+
 const getJfaSummary      = (year) => get(`/summary/jfa?year=${year}`);
 const getJobFairSummary  = (year) => get(`/summary/jobfair?year=${year}`);
 const getMonitoringSummary=(year) => get(`/summary/monitoring?year=${year}`);
@@ -252,6 +438,7 @@ module.exports = {
   getMonitoringRecords, getMonitoringById, createMonitoring,
   updateMonitoring, deleteMonitoring,
   pickMonitoringEvidencePath, openMonitoringEvidencePath,
+  uploadEvidenceFiles, listEvidencePath, downloadEvidenceZip, downloadBatchZip,
   // summaries
   getJfaSummary, getJobFairSummary, getMonitoringSummary,
   getEventDetails, getYearlyTotals,

@@ -301,6 +301,10 @@ function registerClientProxyHandlers() {
   proxy('monitoring:delete',            (id)=> apiClient.deleteMonitoring(id));
   proxy('monitoring:pickEvidencePath',  ()  => apiClient.pickMonitoringEvidencePath());
   proxy('monitoring:openEvidencePath',  (p) => apiClient.openMonitoringEvidencePath(p));
+  proxy('monitoring:uploadEvidence',    (d) => apiClient.uploadEvidenceFiles(d.filePaths, d.folder));
+  proxy('monitoring:listEvidence',      (p) => apiClient.listEvidencePath(p));
+  proxy('monitoring:downloadEvidenceZip', (p) => apiClient.downloadEvidenceZip(p));
+  proxy('monitoring:downloadBatchZip',  (paths) => apiClient.downloadBatchZip(paths));
 
   proxy('summary:jfa',              (y)   => apiClient.getJfaSummary(y));
   proxy('summary:jobfair',          (y)   => apiClient.getJobFairSummary(y));
