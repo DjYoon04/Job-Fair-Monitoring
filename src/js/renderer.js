@@ -1389,283 +1389,270 @@ function applyMonitoringPdfLayout(table) {
 async function exportTableToPdf(tableSelector, filename) {
   try {
     const element = document.querySelector(tableSelector);
-    if (!element) {
-      showToast('Table not found', 'error');
-      return;
-    }
+    if (!element) { showToast('Table not found', 'error'); return; }
+    if (!window.jspdf || !window.jspdf.jsPDF) { showToast('PDF library not loaded', 'error'); return; }
 
-    if (!window.html2pdf) {
-      showToast('PDF library not loaded', 'error');
-      return;
-    }
+    const { jsPDF } = window.jspdf;
 
-    const isJfaExport = tableSelector === '#jfaTable';
-    const isJobFairReportExport = tableSelector === '#jfTable';
-    const isMonitoringExport = tableSelector === '#monTable';
+    const isJfaExport        = tableSelector === '#jfaTable';
+    const isJobFairExport     = tableSelector === '#jfTable';
+    const isMonitoringExport  = tableSelector === '#monTable';
+    const isJfaSummaryExport  = filename === 'JFA_Summary.pdf';
+    const isJobFairSummaryExport = filename === 'Job_Fair_Summary.pdf';
     const isLargeHeaderExport = filename === 'Job_Fair_Reports.pdf';
     const isJfaTrackingExport = filename === 'JFA_Tracking.pdf';
-    const isJfaSummaryExport = filename === 'JFA_Summary.pdf';
-    const isJobFairSummaryExport = filename === 'Job_Fair_Summary.pdf';
-    const isWideExport = isJfaExport || isJobFairReportExport;
 
-    // Get title from filename
+    // ── Page format ──────────────────────────────────────────────────────────
+    // Wide tables (JFA, Job Fair, Monitoring) use A3 landscape for more columns.
+    // Summary tables use A4 landscape. All use landscape orientation.
+    let pageFormat = 'a4';
+    if (isJfaExport)       pageFormat = 'a3';
+    if (isJobFairExport)   pageFormat = 'a2';
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: pageFormat, compress: true });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 8;
+    const contentW = pageW - margin * 2;
+
+    // ── Title from filename ──────────────────────────────────────────────────
     let title = filename.replace(/_/g, ' ').replace('.pdf', '').toUpperCase();
-    if (tableSelector === '#monTable') {
-      const selectedYear = getFormValue('monFilterYear') || '2026';
+    if (isMonitoringExport) {
+      const selectedYear = getFormValue('monFilterYear') || new Date().getFullYear();
       title = `${selectedYear} JOB FAIR MONITORING`;
     }
 
-    // Clone and clean the table
+    // ── Draw letterhead on every page ───────────────────────────────────────
+    const headerH = 28; // mm reserved for letterhead on each page
+
+    function drawHeader(doc, pageNum, totalPages) {
+      const y0 = margin;
+
+      // Left logo
+      try {
+        const leftImg  = document.querySelector('img[alt="DMW Logo"]') ||
+                         document.querySelector('img[src*="dmw_logo"]');
+        if (leftImg && leftImg.complete) {
+          const canvas = document.createElement('canvas');
+          canvas.width = leftImg.naturalWidth || 80;
+          canvas.height = leftImg.naturalHeight || 80;
+          canvas.getContext('2d').drawImage(leftImg, 0, 0);
+          doc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, y0, 18, 18);
+        }
+      } catch(_) {}
+
+      // Right logo
+      try {
+        const rightImg = document.querySelector('img[alt="Bagong Pilipinas Logo"]') ||
+                         document.querySelector('img[src*="Bagong_Pilipinas"]');
+        if (rightImg && rightImg.complete) {
+          const canvas = document.createElement('canvas');
+          canvas.width = rightImg.naturalWidth || 110;
+          canvas.height = rightImg.naturalHeight || 80;
+          canvas.getContext('2d').drawImage(rightImg, 0, 0);
+          doc.addImage(canvas.toDataURL('image/png'), 'PNG', pageW - margin - 22, y0, 22, 18);
+        }
+      } catch(_) {}
+
+      // Center text block
+      const cx = pageW / 2;
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(45, 71, 113);
+      doc.text('Republic of the Philippines', cx, y0 + 4, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(27, 52, 87);
+      doc.text('Department of Migrant Workers', cx, y0 + 10, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(27, 52, 87);
+      doc.text('Regional Office - XIII (Caraga)', cx, y0 + 15.5, { align: 'center' });
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(79, 100, 130);
+      doc.text(
+        '3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600',
+        cx, y0 + 19.5, { align: 'center' }
+      );
+
+      // Title line
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(58, 95, 137);
+      doc.text(title, cx, y0 + 24, { align: 'center' });
+
+      // Separator line
+      doc.setDrawColor(213, 222, 234);
+      doc.setLineWidth(0.4);
+      doc.line(margin, y0 + 26.5, pageW - margin, y0 + 26.5);
+
+      // Page number (bottom right)
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Page ${pageNum} of ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
+
+      // Footer line
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.3);
+      doc.line(margin, pageH - 7, pageW - margin, pageH - 7);
+      doc.setFontSize(6.5);
+      doc.text('This document was automatically generated by the Job Fair Monitoring System', cx, pageH - 3.5, { align: 'center' });
+    }
+
+    // ── Clone & clean table ──────────────────────────────────────────────────
     const clonedTable = element.cloneNode(true);
 
-    // Monitoring evidence is rendered as clickable buttons in the UI.
-    // Convert them to plain text so they remain visible in PDF exports.
-    if (tableSelector === '#monTable') {
-      clonedTable.querySelectorAll('.mon-evidence-link').forEach((btn) => {
+    // Convert evidence buttons to plain text
+    if (isMonitoringExport) {
+      clonedTable.querySelectorAll('.mon-evidence-link, .mon-evidence-download-all').forEach((btn) => {
         const text = btn.textContent.trim() || btn.getAttribute('title') || '-';
         const span = document.createElement('span');
         span.textContent = text;
         btn.replaceWith(span);
       });
-    }
-
-    // Remove all buttons first
-    clonedTable.querySelectorAll('button').forEach(btn => btn.remove());
-
-    // Remove all action columns by class
-    clonedTable.querySelectorAll('.actions-cell').forEach(cell => cell.remove());
-
-    // Find and remove "Actions" header column using colspan-aware indexing.
-    let actionsColumnIndex = -1;
-    const firstHeaderRow = clonedTable.querySelector('thead tr');
-    if (firstHeaderRow) {
-      let logicalIndex = 0;
-      const firstRowHeaders = Array.from(firstHeaderRow.querySelectorAll('th'));
-
-      firstRowHeaders.forEach((header) => {
-        const colSpan = Math.max(1, Number(header.getAttribute('colspan')) || 1);
-        if (header.textContent.trim().toUpperCase() === 'ACTIONS') {
-          actionsColumnIndex = logicalIndex;
-          header.remove();
-          return;
-        }
-        logicalIndex += colSpan;
-      });
-    }
-
-    // If we found an Actions column, remove it with colspan-aware row handling.
-    if (actionsColumnIndex !== -1) {
-      const allRows = clonedTable.querySelectorAll('tr');
-      allRows.forEach((row) => {
-        const cells = Array.from(row.querySelectorAll('th, td'));
-        let logicalIndex = 0;
-
-        cells.forEach((cell) => {
-          const colSpan = Math.max(1, Number(cell.getAttribute('colspan')) || 1);
-          const spanStart = logicalIndex;
-          const spanEnd = logicalIndex + colSpan - 1;
-
-          // When a merged cell covers the removed column, shrink its colspan.
-          if (actionsColumnIndex >= spanStart && actionsColumnIndex <= spanEnd) {
-            if (colSpan > 1) {
-              cell.setAttribute('colspan', String(colSpan - 1));
-            } else {
-              cell.remove();
-            }
-          }
-
-          logicalIndex += colSpan;
-        });
-      });
-    }
-
-    if (tableSelector === '#monTable') {
       applyMonitoringPdfLayout(clonedTable);
     }
 
-    // Create styled wrapper
-    const wrapper = document.createElement('div');
-    wrapper.style.padding = '15px';
-    wrapper.style.fontFamily = 'Arial, sans-serif';
-    wrapper.style.fontSize = '10px';
-    wrapper.style.lineHeight = '1.3';
-    wrapper.style.width = '100%';
-    wrapper.style.boxSizing = 'border-box';
+    // Remove buttons and action cells
+    clonedTable.querySelectorAll('button').forEach(btn => btn.remove());
+    clonedTable.querySelectorAll('.actions-cell').forEach(cell => cell.remove());
 
-    // Add header
-    const headerScale = isLargeHeaderExport
-      ? 1.45
-      : (isJfaTrackingExport ? 1.0 : ((isJfaSummaryExport || isJobFairSummaryExport) ? 0.7 : 0.8));
-    wrapper.innerHTML = createPdfHeader(title, headerScale);
-
-    // Add CSS to prevent row breaks across pages
-    const style = document.createElement('style');
-    style.innerHTML = `
-      table {
-        page-break-inside: avoid;
-        border-collapse: collapse;
-      }
-      thead {
-        display: table-header-group;
-        page-break-after: avoid;
-      }
-      tfoot {
-        display: table-footer-group;
-      }
-      tr {
-        page-break-inside: avoid;
-        page-break-after: auto;
-      }
-      td, th {
-        page-break-inside: avoid;
-      }
-    `;
-    wrapper.appendChild(style);
-
-    // Style the table
-    const table = clonedTable;
-    table.style.width = '100%';
-    table.style.borderCollapse = 'collapse';
-    table.style.marginTop = '10px';
-    table.style.fontSize = isJfaExport ? '14px' : (isJobFairReportExport ? '17px' : '9px');
-    if (isWideExport || isMonitoringExport) {
-      table.style.tableLayout = 'fixed';
-
-      // Compact selected columns while keeping wide text columns readable.
-      const jfaColWidths = ['3%', '8%', '14%', '8%', '15%', '8%', '8%', '8%', '8%', '10%'];
-      const jfColWidths = ['13%', '6%', '11%', '11%', '6%', '4%', '4%', '4%', '4%', '4%', '4%', '6%', '6%', '4%', '8%'];
-      const monitoringColWidths = ['3%', '9%', '6%', '11%', '7%', '6%', '6%', '7%', '7%', '7%', '7%', '6%', '8%', '7%'];
-      const columnWidths = isJfaExport ? jfaColWidths : (isJobFairReportExport ? jfColWidths : monitoringColWidths);
-      const existingColGroup = table.querySelector('colgroup');
-      if (existingColGroup) {
-        existingColGroup.remove();
-      }
-
-      const colGroup = document.createElement('colgroup');
-      columnWidths.forEach((width) => {
-        const col = document.createElement('col');
-        col.style.width = width;
-        colGroup.appendChild(col);
-      });
-      table.insertBefore(colGroup, table.firstChild);
-    }
-    table.setAttribute('cellpadding', '0');
-    table.setAttribute('cellspacing', '0');
-
-    // Get all rows
-    const rows = table.querySelectorAll('tr');
-    rows.forEach((row, rowIdx) => {
-      const cells = row.querySelectorAll('th, td');
-      const isHeader = rowIdx === 0 || row.querySelector('th');
-      const isJfSubtotalRow = row.classList.contains('jf-subtotal-row');
-      const isSummarySubtotalRow = row.classList.contains('summary-subtotal-row');
-      const isJfGrandTotalRow = row.classList.contains('jf-grand-total-row');
-
-      // Set row styles
-      row.style.pageBreakInside = 'avoid';
-      row.style.pageBreakAfter = 'auto';
-
-      // Calculate cell width based on content
-      cells.forEach((cell, cellIdx) => {
-        // Remove existing inline styles
-        cell.style.cssText = '';
-
-        // Set cell styling
-        cell.style.border = '1px solid #bbb';
-        cell.style.padding = isJfaExport ? '3px 4px' : (isJobFairReportExport ? '2px 3px' : '6px 8px');
-        cell.style.wordWrap = 'break-word';
-        cell.style.overflowWrap = 'break-word';
-        cell.style.whiteSpace = 'normal';
-        cell.style.maxWidth = isJfaExport ? '64px' : (isJobFairReportExport ? '72px' : '100px');
-        cell.style.pageBreakInside = 'avoid';
-        if (isJobFairReportExport) {
-          cell.style.fontSize = '17px';
-          cell.style.lineHeight = '1.1';
-        }
-
-        if (isHeader) {
-          cell.style.backgroundColor = '#34495E';
-          cell.style.color = '#FFFFFF';
-          cell.style.fontWeight = 'bold';
-          cell.style.textAlign = 'center';
-          cell.style.padding = isJfaExport ? '4px 3px' : (isJobFairReportExport ? '3px 2px' : '8px 6px');
-          if (isMonitoringExport) {
-            cell.style.fontSize = '8px';
-            cell.style.lineHeight = '1.15';
-            cell.style.padding = '4px 3px';
-          }
-          if (isWideExport) {
-            cell.style.fontSize = isJfaExport ? '14px' : '17px';
-            cell.style.lineHeight = '1.1';
-          }
-          cell.style.pageBreakAfter = 'avoid';
-        } else {
-          if (isJfGrandTotalRow) {
-            cell.style.backgroundColor = '#dbeafe';
-            cell.style.fontWeight = '700';
-          } else if (isJfSubtotalRow || isSummarySubtotalRow) {
-            // Subtotal rows use yellow background
-            cell.style.backgroundColor = '#FFFACD';
-            cell.style.fontWeight = '600';
-          } else if (rowIdx % 2 === 0) {
-            // Alternate row colors
-            cell.style.backgroundColor = '#FFFFFF';
-          } else {
-            cell.style.backgroundColor = '#ECF0F1';
-          }
-
-          // Align numeric content to center
-          const content = cell.textContent.trim();
-          if (content.match(/^\d+$/) || content === '✅' || content === '❌' || content === '-') {
-            cell.style.textAlign = 'center';
-          } else {
-            cell.style.textAlign = 'left';
-          }
-        }
-      });
+    // Remove Actions header
+    clonedTable.querySelectorAll('thead th').forEach(th => {
+      if (th.textContent.trim().toUpperCase() === 'ACTIONS') th.remove();
     });
 
-    // Remove tfoot if exists
-    const tfoot = table.querySelector('tfoot');
-    if (tfoot) tfoot.remove();
+    // ── Extract head rows & body rows ────────────────────────────────────────
+    function cellText(cell) {
+      // Collapse whitespace; strip HTML
+      return cell.textContent.replace(/\s+/g, ' ').trim();
+    }
 
-    wrapper.appendChild(table);
+    // Build head array (supports multi-row headers)
+    const headRows = [];
+    clonedTable.querySelectorAll('thead tr').forEach(tr => {
+      headRows.push(Array.from(tr.querySelectorAll('th')).map(th => ({
+        content: cellText(th),
+        colSpan: parseInt(th.getAttribute('colspan') || '1'),
+        rowSpan: parseInt(th.getAttribute('rowspan') || '1'),
+        styles: { halign: 'center', fillColor: [52, 73, 94], textColor: 255, fontStyle: 'bold' }
+      })));
+    });
 
-    // Add footer
-    const footer = document.createElement('div');
-    footer.style.marginTop = '15px';
-    footer.style.paddingTop = '8px';
-    footer.style.borderTop = '1px solid #ccc';
-    footer.style.fontSize = '9px';
-    footer.style.color = '#999';
-    footer.style.textAlign = 'center';
-    footer.innerHTML = `<p style="margin: 0;">This document was automatically generated by the Job Fair Monitoring System</p>`;
-    wrapper.appendChild(footer);
+    // Build body rows
+    const bodyRows = [];
+    clonedTable.querySelectorAll('tbody tr').forEach((tr, rowIdx) => {
+      const isSubtotal   = tr.classList.contains('jf-subtotal-row') || tr.classList.contains('summary-subtotal-row');
+      const isGrandTotal = tr.classList.contains('jf-grand-total-row');
+      const rowCells     = Array.from(tr.querySelectorAll('td, th'));
 
-    const opt = {
-      margin: isJfaExport ? [5, 5, 5, 5] : (isJobFairReportExport ? [5, 5, 5, 5] : [8, 8, 8, 8]),
-      filename: filename || 'export.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: {
-        scale: isJfaExport ? 1.8 : (isJobFairReportExport ? 1.8 : 2),
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff'
+      const cells = rowCells.map((cell, ci) => {
+        const text    = cellText(cell);
+        const isNum   = /^\d+$/.test(text) || text === '-';
+        const colSpan = parseInt(cell.getAttribute('colspan') || '1');
+        const rowSpan = parseInt(cell.getAttribute('rowspan') || '1');
+
+        const cellDef = {
+          content: text,
+          colSpan,
+          rowSpan,
+          styles: { halign: isNum ? 'center' : 'left', overflow: 'linebreak' }
+        };
+
+        if (isGrandTotal) {
+          cellDef.styles.fillColor = [219, 234, 254];
+          cellDef.styles.fontStyle = 'bold';
+        } else if (isSubtotal) {
+          cellDef.styles.fillColor = [255, 250, 205];
+          cellDef.styles.fontStyle = 'bold';
+        } else if (rowIdx % 2 === 0) {
+          cellDef.styles.fillColor = [255, 255, 255];
+        } else {
+          cellDef.styles.fillColor = [236, 240, 241];
+        }
+
+        return cellDef;
+      });
+
+      bodyRows.push(cells);
+    });
+
+    // ── Font size & column widths ────────────────────────────────────────────
+    let bodyFontSize = 7.5;
+    let headFontSize = 7;
+    if (isJfaExport)      { bodyFontSize = 8;   headFontSize = 7.5; }
+    if (isJobFairExport)  { bodyFontSize = 7;   headFontSize = 6.5; }
+    if (isMonitoringExport){ bodyFontSize = 6.5; headFontSize = 6; }
+
+    // Optional explicit column widths (as % of contentW, converted to mm)
+    let columnStyles = {};
+    if (isJfaExport) {
+      const jfaPcts = [3,8,14,8,15,8,8,8,8,10];
+      jfaPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+    } else if (isJobFairExport) {
+      const jfPcts = [13,6,11,11,6,4,4,4,4,4,4,6,6,4,8];
+      jfPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+    } else if (isMonitoringExport) {
+      const monPcts = [3,9,7,11,7,6,6,7,7,7,7,7,8,7];
+      monPcts.forEach((p, i) => { columnStyles[i] = { cellWidth: contentW * p / 100 }; });
+    }
+
+    // ── Run autoTable ────────────────────────────────────────────────────────
+    doc.autoTable({
+      head:         headRows,
+      body:         bodyRows,
+      startY:       margin + headerH,       // start below letterhead
+      margin:       { top: margin + headerH, bottom: 12, left: margin, right: margin },
+      tableWidth:   contentW,
+      styles: {
+        fontSize:    bodyFontSize,
+        cellPadding: 1.5,
+        overflow:    'linebreak',
+        lineColor:   [187, 187, 187],
+        lineWidth:   0.2,
+        valign:      'middle',
       },
-      jsPDF: {
-        orientation: 'landscape',
-        unit: 'mm',
-        format: isJfaExport ? 'a3' : (isJobFairReportExport ? 'a2' : 'a4'),
-        compress: true,
-        precision: 10
+      headStyles: {
+        fontSize:    headFontSize,
+        fillColor:   [52, 73, 94],
+        textColor:   255,
+        fontStyle:   'bold',
+        halign:      'center',
+        cellPadding: 2,
+        valign:      'middle',
       },
-      pagebreak: {
-        mode: ['css', 'legacy']
-      }
-    };
+      columnStyles,
+      // Repeat header on every new page
+      showHead:    'everyPage',
+      // Draw the letterhead on every page (including continuation pages)
+      didDrawPage: (data) => {
+        drawHeader(doc, data.pageNumber, '{TOTAL}');
+      },
+    });
 
-    window.html2pdf().set(opt).from(wrapper).save();
+    // ── Replace placeholder page-count ──────────────────────────────────────
+    // autoTable fires didDrawPage as pages are created; we don't know total until done.
+    // Patch all pages afterwards.
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      // White out the placeholder and redraw the correct count
+      doc.setFillColor(255, 255, 255);
+      doc.rect(pageW - margin - 28, pageH - 8, 30, 5, 'F');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Page ${p} of ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
+    }
+
+    doc.save(filename || 'export.pdf');
     showToast(`✅ Exported to ${filename}`, 'success');
+
   } catch (err) {
     console.error('PDF export error:', err);
     showToast('Error exporting PDF: ' + err.message, 'error');
@@ -3952,20 +3939,13 @@ function renderMonitoringEvidenceLinks(evidencePath) {
 
   if (!paths.length) return '-';
 
-  const links = paths.map((pathValue) => {
+  return paths.map((pathValue) => {
     const normalized = pathValue.replace(/[\\/]+$/, '');
-    const parts = normalized.split(/[\/\\]/).filter(Boolean);
+    const parts = normalized.split(/[\\/]/).filter(Boolean);
     const displayName = parts.length ? parts[parts.length - 1] : pathValue;
     const encodedPath = encodeURIComponent(pathValue);
     return `<button type="button" class="mon-evidence-link" data-path="${encodedPath}" title="${pathValue}">${displayName}</button>`;
   }).join('<br>');
-
-  // If there are multiple paths, add a "Download All" button
-  const downloadAll = paths.length > 1
-    ? `<br><button type="button" class="mon-evidence-download-all btn-sm" data-paths="${encodeURIComponent(JSON.stringify(paths))}" title="Download all as ZIP">⬇ Download All</button>`
-    : '';
-
-  return links + downloadAll;
 }
 
 async function loadMonitoring() {
@@ -4017,66 +3997,22 @@ async function loadMonitoring() {
         const targetPath = decodeURIComponent(encoded);
         if (!targetPath) return;
 
-        btn.disabled = true;
-        const origText = btn.textContent;
-        btn.textContent = '⏳ Opening…';
-
         try {
-          // First try normal open (works on server machine for files)
           const result = await window.api.openMonitoringEvidencePath(targetPath);
           if (!result?.success) {
-            const msg = result?.error || 'Unable to open evidence';
-            // If it's a folder or remote path, download as ZIP instead
-            if (msg.includes('directory') || msg.includes('folder') || msg.includes('not found')) {
-              showToast('Downloading folder as ZIP…', 'info');
-              const zipResult = await window.api.downloadEvidenceZip(targetPath);
-              if (zipResult?.success) {
-                showToast('Folder downloaded and opened.', 'success');
-              } else {
-                showToast('Download failed: ' + (zipResult?.error || msg), 'error');
-              }
+            const msg = result?.error || 'Unable to open evidence file';
+            if (msg.includes('directory') || msg.includes('folder')) {
+              showToast('Evidence path is a folder — only individual files can be opened remotely.', 'warning');
+            } else if (msg.includes('not found') || msg.includes('File not found')) {
+              showToast('Evidence file not found on the server. It may have been moved or deleted.', 'error');
             } else {
-              showToast('Unable to open evidence: ' + msg, 'error');
+              showToast('Unable to open evidence file: ' + msg, 'error');
             }
           } else {
-            showToast('Evidence opened.', 'success');
+            showToast('Evidence file downloaded and opened.', 'success');
           }
         } catch (err) {
-          showToast('Unable to open evidence: ' + err.message, 'error');
-        } finally {
-          btn.disabled = false;
-          btn.textContent = origText;
-        }
-      });
-    });
-
-    // Download All button — batches multiple paths into one ZIP
-    document.querySelectorAll('.mon-evidence-download-all').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        try {
-          const paths = JSON.parse(decodeURIComponent(btn.dataset.paths || '[]'));
-          if (!paths.length) return;
-          btn.disabled = true;
-          btn.textContent = '⏳ Zipping…';
-          const result = await window.api.downloadBatchZip(paths);
-          if (result?.success) {
-            showToast('All files downloaded as ZIP.', 'success');
-          } else if (result?.results) {
-            // Server role: individual opens
-            const failed = result.results.filter(r => !r.success);
-            if (failed.length) {
-              showToast(`Opened files with ${failed.length} error(s).`, 'warning');
-            } else {
-              showToast('All evidence files opened.', 'success');
-            }
-          } else {
-            showToast('Batch download failed: ' + (result?.error || 'Unknown error'), 'error');
-          }
-        } catch (err) {
-          showToast('Batch download failed: ' + err.message, 'error');
-        } finally {
-          btn.disabled = false;
-          btn.textContent = '⬇ Download All';
+          showToast('Unable to open evidence path: ' + err.message, 'error');
         }
       });
     });
@@ -4326,29 +4262,16 @@ async function openMonitoringForm(id = null) {
   // Helper function to process dropped files/folders
   const processDroppedFiles = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
-
-    const filePaths = Array.from(fileList).map(f => f.path).filter(Boolean);
-    if (!filePaths.length) {
-      showToast('No valid file paths found. Make sure you are dropping local files.', 'warning');
-      return;
-    }
-
-    const hint = dropZone.querySelector('div');
-    if (hint) { hint.innerHTML = '<span style="color:#0066cc;">⏳ Uploading…</span>'; hint.style.display = 'block'; }
-
+    
     try {
-      const result = await window.api.uploadEvidenceFiles({ filePaths, folder: '' });
-      if (!result?.uploaded?.length) {
-        showToast('Upload returned no files.', 'warning');
-        if (hint) hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>';
-        return;
+      // Collect file paths
+      const paths = [];
+      for (let file of fileList) {
+        paths.push(file.path);
       }
-      const serverPaths = result.uploaded.map(u => u.path);
-      updateEvidencePath(serverPaths);
-      showToast(`Uploaded ${result.uploaded.length} file(s) to server.`, 'success');
+      updateEvidencePath(paths);
     } catch (err) {
-      showToast('Upload failed: ' + err.message, 'error');
-      if (hint) hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>';
+      showToast('Failed to process files: ' + err.message, 'error');
     }
   };
 
@@ -4390,23 +4313,7 @@ async function openMonitoringForm(id = null) {
         if (!result || result.canceled || !Array.isArray(result.paths) || result.paths.length === 0) {
           return;
         }
-        // Upload picked files to server
-        const hint = dropZone.querySelector('div');
-        if (hint) { hint.innerHTML = '<span style="color:#0066cc;">⏳ Uploading…</span>'; hint.style.display = 'block'; }
-        try {
-          const upResult = await window.api.uploadEvidenceFiles({ filePaths: result.paths, folder: '' });
-          if (upResult?.uploaded?.length) {
-            updateEvidencePath(upResult.uploaded.map(u => u.path));
-            showToast(`Uploaded ${upResult.uploaded.length} file(s) to server.`, 'success');
-          } else {
-            // Fallback: store local paths if upload not available (server role same machine)
-            updateEvidencePath(result.paths);
-          }
-        } catch (uploadErr) {
-          // If upload IPC not available, fall back to local paths
-          updateEvidencePath(result.paths);
-        }
-        if (hint && !hint.style.display.includes('none')) { hint.innerHTML = '<strong>Drag and drop files or folders here</strong> or <strong>click to browse</strong>'; }
+        updateEvidencePath(result.paths);
       } catch (err) {
         showToast('Failed to pick files/folders: ' + err.message, 'error');
       }

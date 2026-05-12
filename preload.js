@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('api', {
   deleteMonitoring: (id) => ipcRenderer.invoke('monitoring:delete', id),
   pickMonitoringEvidencePath: (mode) => ipcRenderer.invoke('monitoring:pickEvidencePath', mode),
   openMonitoringEvidencePath: (targetPath) => ipcRenderer.invoke('monitoring:openEvidencePath', targetPath),
+  uploadEvidenceFiles: (data) => ipcRenderer.invoke('monitoring:uploadEvidence', data),
+  listEvidencePath: (targetPath) => ipcRenderer.invoke('monitoring:listEvidence', targetPath),
+  downloadEvidenceZip: (targetPath) => ipcRenderer.invoke('monitoring:downloadEvidenceZip', targetPath),
+  downloadBatchZip: (paths) => ipcRenderer.invoke('monitoring:downloadBatchZip', paths),
 
   // ── Summaries ──
   getJfaSummary: (year) => ipcRenderer.invoke('summary:jfa', year),
