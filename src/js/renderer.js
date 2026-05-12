@@ -1664,18 +1664,31 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('Prepared by:', leftX, sigY);
       doc.text('Reviewed By:', rightX, sigY);
 
-      // ── Name lines (bold + underline, ~14mm below label) ─────────────────
+      // ── Name lines (bold, ~14mm below label) ──────────────────────────────
       const nameY = sigY + 14;
 
+      // Set font/size BEFORE measuring so getTextWidth() returns the correct value
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(0, 0, 0);
-      // jsPDF 2.x native underline — perfectly tracks the actual rendered text width
-      doc.text('AURORA JEAN A. TORRALBA',    leftX,  nameY, { baseline: 'alphabetic', underline: true });
-      doc.text('REGIENALD S. ESPALDON, CPA', rightX, nameY, { baseline: 'alphabetic', underline: true });
+
+      const leftName  = 'AURORA JEAN A. TORRALBA';
+      const rightName = 'REGIENALD S. ESPALDON, CPA';
+      doc.text(leftName,  leftX,  nameY);
+      doc.text(rightName, rightX, nameY);
+
+      // Measure AFTER setting the same font/size — width is now accurate
+      const leftNameW  = doc.getTextWidth(leftName);
+      const rightNameW = doc.getTextWidth(rightName);
+
+      // Draw underline 1 mm below the text baseline (sits flush under the letters)
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.4);
+      doc.line(leftX,  nameY + 1, leftX  + leftNameW,  nameY + 1);
+      doc.line(rightX, nameY + 1, rightX + rightNameW, nameY + 1);
 
       // ── Titles (italic, just below names) ────────────────────────────────
-      const titleY = nameY + 5;
+      const titleY = nameY + 5.5;
 
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7.5);
