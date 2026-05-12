@@ -13,8 +13,8 @@
 
 const express    = require('express');
 const bodyParser = require('body-parser');
-const multer     = require('multer');
-const archiver   = require('archiver');
+const Busboy     = require('busboy');
+const AdmZip     = require('adm-zip');
 const crypto     = require('crypto');
 const fs         = require('fs');
 const path       = require('path');
@@ -68,31 +68,49 @@ function buildApp() {
   const app = express();
   app.use(bodyParser.json({ limit: '50mb' }));
 
-  // ── Multer: store uploaded files in <userData>/uploads on the server ────────
-  // The upload directory is placed in the OS temp folder under job-fair-uploads.
-  // In production you should point this at a stable persistent directory.
+  // ── Upload directory ────────────────────────────────────────────────────────
   const UPLOAD_DIR = path.join(os.homedir(), 'job-fair-uploads');
   if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      // Preserve optional sub-folder sent by the client as ?folder=relative/path
-      const sub = String(req.query.folder || '').replace(/\.\./g, '').trim();
-      const dest = sub ? path.join(UPLOAD_DIR, sub) : UPLOAD_DIR;
-      fs.mkdirSync(dest, { recursive: true });
-      cb(null, dest);
-    },
-    filename: (req, file, cb) => {
-      // Keep original filename; prefix with timestamp to avoid collisions
-      const safe = file.originalname.replace(/[^a-zA-Z0-9._\-() ]/g, '_');
-      cb(null, safe);
-    },
-  });
+  /** Parse multipart/form-data uploads using busboy (pure CJS, no ESM issues) */
+  function parseUpload(req, destDir) {
+    return new Promise((resolve, reject) => {
+      fs.mkdirSync(destDir, { recursive: true });
+      const uploaded = [];
+      const bb = Busboy({ headers: req.headers, limits: { fileSize: 200 * 1024 * 1024 } });
 
-  const upload = multer({
-    storage,
-    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB per file
-  });
+      bb.on('file', (fieldname, stream, info) => {
+        const safe = (info.filename || 'file').replace(/[^a-zA-Z0-9._\-() ]/g, '_');
+        const dest = path.join(destDir, safe);
+        const ws   = fs.createWriteStream(dest);
+        stream.pipe(ws);
+        ws.on('finish', () => {
+          const size = fs.statSync(dest).size;
+          uploaded.push({ name: info.filename || safe, savedName: safe, path: dest, size, mimetype: info.mimeType });
+        });
+        ws.on('error', reject);
+      });
+
+      bb.on('finish', () => resolve(uploaded));
+      bb.on('error',  reject);
+      req.pipe(bb);
+    });
+  }
+
+  /** Build a ZIP buffer from a list of file/folder paths using adm-zip (CJS) */
+  function buildZip(targets) {
+    const zip = new AdmZip();
+    for (const target of targets) {
+      if (!target || !fs.existsSync(target)) continue;
+      const stat = fs.statSync(target);
+      if (stat.isDirectory()) {
+        zip.addLocalFolder(target, path.basename(target));
+      } else {
+        zip.addLocalFile(target);
+      }
+    }
+    return zip.toBuffer();
+  }
 
   // Health check – clients use this to verify the server is reachable
   app.get('/health', (req, res) => {
@@ -573,21 +591,18 @@ function buildApp() {
   // ── Evidence file upload (single or multiple) ──────────────────────────────
   // POST /monitoring/evidence/upload?folder=optional/sub/path
   // Body: multipart/form-data, field name "files" (multiple allowed)
-  // Returns: { ok: true, data: { uploaded: [{name, path, size}] } }
-  app.post('/monitoring/evidence/upload', upload.array('files', 100), wrap(async (req, res) => {
-    if (!req.files || req.files.length === 0) {
-      return err(res, 'No files received', 400);
+  app.post('/monitoring/evidence/upload', async (req, res) => {
+    try {
+      const sub  = String(req.query.folder || '').replace(/\.\./g, '').trim();
+      const dest = sub ? path.join(UPLOAD_DIR, sub) : UPLOAD_DIR;
+      const uploaded = await parseUpload(req, dest);
+      if (!uploaded.length) return err(res, 'No files received', 400);
+      console.log(`[API] Uploaded ${uploaded.length} file(s):`, uploaded.map(f => f.name).join(', '));
+      ok(res, { uploaded });
+    } catch (e) {
+      err(res, e.message || String(e));
     }
-    const uploaded = req.files.map((f) => ({
-      name:         f.originalname,
-      savedName:    f.filename,
-      path:         f.path,
-      size:         f.size,
-      mimetype:     f.mimetype,
-    }));
-    console.log(`[API] Uploaded ${uploaded.length} file(s):`, uploaded.map(f => f.name).join(', '));
-    ok(res, { uploaded });
-  }));
+  });
 
   // ── Evidence folder listing ─────────────────────────────────────────────────
   // GET /monitoring/evidence/list?path=server/folder/path
@@ -612,66 +627,43 @@ function buildApp() {
 
   // ── Evidence folder ZIP download ────────────────────────────────────────────
   // GET /monitoring/evidence/zip?path=server/folder/path
-  // Streams a ZIP of the entire folder (all files, recursively)
   app.get('/monitoring/evidence/zip', (req, res) => {
     const target = String(req.query.path || '').trim();
     if (!target) return res.status(400).json({ ok: false, error: 'No path specified' });
     if (!fs.existsSync(target)) return res.status(404).json({ ok: false, error: 'Path not found: ' + target });
 
-    const stat = fs.statSync(target);
-    const zipName = encodeURIComponent(path.basename(target) + '.zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
-    res.setHeader('Content-Type', 'application/zip');
-
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    archive.on('error', (e) => {
+    try {
+      const zipName = encodeURIComponent(path.basename(target) + '.zip');
+      const buffer  = buildZip([target]);
+      res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Length', buffer.length);
+      res.end(buffer);
+    } catch (e) {
       console.error('[API] ZIP error:', e.message);
       if (!res.headersSent) res.status(500).json({ ok: false, error: e.message });
-    });
-    archive.pipe(res);
-
-    if (stat.isDirectory()) {
-      archive.directory(target, path.basename(target));
-    } else {
-      archive.file(target, { name: path.basename(target) });
     }
-    archive.finalize();
   });
 
   // ── Evidence multi-file batch download ─────────────────────────────────────
   // POST /monitoring/evidence/batch-zip
   // Body: { paths: ["/abs/path/a", "/abs/path/b", ...] }
-  // Streams a ZIP containing all requested files/folders
   app.post('/monitoring/evidence/batch-zip', (req, res) => {
     const paths = req.body?.paths;
     if (!Array.isArray(paths) || paths.length === 0) {
       return res.status(400).json({ ok: false, error: 'No paths provided' });
     }
 
-    res.setHeader('Content-Disposition', 'attachment; filename="evidence-files.zip"');
-    res.setHeader('Content-Type', 'application/zip');
-
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    archive.on('error', (e) => {
+    try {
+      const buffer = buildZip(paths);
+      res.setHeader('Content-Disposition', 'attachment; filename="evidence-files.zip"');
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Length', buffer.length);
+      res.end(buffer);
+    } catch (e) {
       console.error('[API] Batch ZIP error:', e.message);
       if (!res.headersSent) res.status(500).json({ ok: false, error: e.message });
-    });
-    archive.pipe(res);
-
-    for (const p of paths) {
-      const target = String(p || '').trim();
-      if (!target || !fs.existsSync(target)) {
-        console.warn('[API] Batch ZIP: skipping missing path:', target);
-        continue;
-      }
-      const s = fs.statSync(target);
-      if (s.isDirectory()) {
-        archive.directory(target, path.basename(target));
-      } else {
-        archive.file(target, { name: path.basename(target) });
-      }
     }
-    archive.finalize();
   });
 
   // Evidence file serving: streams a server-side file to the client as a binary download.
