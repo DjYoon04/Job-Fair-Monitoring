@@ -160,9 +160,76 @@ const getMonitoringById    = (id)   => get(`/monitoring/${id}`);
 const createMonitoring     = (data) => post('/monitoring', data);
 const updateMonitoring     = (data) => put(`/monitoring/${data.id}`, data);
 const deleteMonitoring     = (id)   => del(`/monitoring/${id}`);
-// File-picker/open are Electron-only — not available on clients via HTTP
+// File-picker is Electron dialog — not available on client via HTTP
 const pickMonitoringEvidencePath = () => Promise.resolve({ canceled: true, paths: [] });
-const openMonitoringEvidencePath = () => Promise.resolve({ success: false, error: 'Not available on client' });
+
+/**
+ * On a client PC, fetch the file from the server and open it locally
+ * by writing it to a temp file via the Electron shell.
+ * Falls back to opening a blob URL in the default browser if shell is unavailable.
+ */
+function openMonitoringEvidencePath(targetPath) {
+  return new Promise((resolve) => {
+    if (!_baseUrl) return resolve({ success: false, error: 'API client not configured.' });
+
+    const url = _baseUrl + '/monitoring/evidence/stream?path=' + encodeURIComponent(targetPath);
+    const urlParsed = new URL(url);
+    const options = {
+      hostname: urlParsed.hostname,
+      port:     parseInt(urlParsed.port, 10),
+      path:     urlParsed.pathname + urlParsed.search,
+      method:   'GET',
+    };
+
+    const req = http.request(options, (res) => {
+      if (res.statusCode !== 200) {
+        let raw = '';
+        res.on('data', c => { raw += c; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(raw);
+            resolve({ success: false, error: parsed.error || 'Server error' });
+          } catch {
+            resolve({ success: false, error: `HTTP ${res.statusCode}` });
+          }
+        });
+        return;
+      }
+
+      // Collect the binary response into a Buffer
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', async () => {
+        try {
+          const os   = require('os');
+          const fs   = require('fs');
+          const path = require('path');
+          const { shell } = require('electron');
+
+          const buffer   = Buffer.concat(chunks);
+          // Extract filename from Content-Disposition or fallback to path basename
+          const cd       = res.headers['content-disposition'] || '';
+          const match    = cd.match(/filename="([^"]+)"/);
+          const filename = match ? decodeURIComponent(match[1]) : path.basename(targetPath);
+          const tmpPath  = path.join(os.tmpdir(), filename);
+
+          fs.writeFileSync(tmpPath, buffer);
+          const error = await shell.openPath(tmpPath);
+          if (error) {
+            resolve({ success: false, error });
+          } else {
+            resolve({ success: true });
+          }
+        } catch (e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    });
+
+    req.on('error', (e) => resolve({ success: false, error: e.message }));
+    req.end();
+  });
+}
 
 // ─── summaries ────────────────────────────────────────────────────────────────
 const getJfaSummary      = (year) => get(`/summary/jfa?year=${year}`);

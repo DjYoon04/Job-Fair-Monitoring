@@ -4013,7 +4013,16 @@ async function loadMonitoring() {
         try {
           const result = await window.api.openMonitoringEvidencePath(targetPath);
           if (!result?.success) {
-            showToast('Unable to open evidence path', 'error');
+            const msg = result?.error || 'Unable to open evidence file';
+            if (msg.includes('directory') || msg.includes('folder')) {
+              showToast('Evidence path is a folder — only individual files can be opened remotely.', 'warning');
+            } else if (msg.includes('not found') || msg.includes('File not found')) {
+              showToast('Evidence file not found on the server. It may have been moved or deleted.', 'error');
+            } else {
+              showToast('Unable to open evidence file: ' + msg, 'error');
+            }
+          } else {
+            showToast('Evidence file downloaded and opened.', 'success');
           }
         } catch (err) {
           showToast('Unable to open evidence path: ' + err.message, 'error');
