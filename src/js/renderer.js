@@ -1296,35 +1296,39 @@ function getMonitoringDateValue(value) {
 // PDF EXPORT FUNCTIONS
 // ============================================================================
 
-function createPdfHeader(title, scale = 1) {
-  const logoSize        = Math.round(100 * scale);
-  const rightLogoWidth  = Math.round(120 * scale);
-  const centerWidth     = Math.round(680 * scale);
-  const republicFontSize    = Math.round(13 * scale);
-  const departmentFontSize  = Math.round(30 * scale);
-  const officeFontSize      = Math.round(16 * scale);
-  const addressFontSize     = Math.round(11 * scale);
-  const titleFontSize       = Math.round(15 * scale);
+function createPdfHeader(title, subtitle = '', scale = 1) {
+  const logoSize         = Math.round(60 * scale);   // reduced from 96 — compact seal size
+  const rightLogoW       = Math.round(85 * scale);   // reduced from 130 — proportional to seal
+  const titleFontSize    = Math.round(15 * scale);
+  const subtitleFontSize = Math.round(13 * scale);
+
+  const subtitleHtml = subtitle
+    ? `<p style="margin:3px 0 0 0; font-size:${subtitleFontSize}px; color:#1b3457; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${subtitle}</p>`
+    : '';
 
   return `
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px 10px; border-bottom:2px solid #1b3457; margin-bottom:10px;">
-      <!-- Left Logo (DMW) -->
-      <div style="flex:0 0 ${logoSize}px; display:flex; align-items:center; justify-content:center;">
-        <img src="img/dmw_logo.png" style="width:${logoSize}px; height:${logoSize}px; object-fit:contain;" alt="DMW Logo">
+    <div style="display:flex; align-items:center; justify-content:center; padding:6px 0 8px 0; border-bottom:1.5px solid #b0b8c8; margin-bottom:10px; gap:12px;">
+
+      <!-- Left Logo (DMW seal) -->
+      <div style="flex:0 0 ${logoSize}px;">
+        <img src="img/dmw_logo.png" style="width:${logoSize}px; height:${logoSize}px; object-fit:contain; display:block;" alt="DMW Logo">
       </div>
 
-      <!-- Center Content -->
-      <div style="flex:1; max-width:${centerWidth}px; text-align:center; padding:0 10px;">
-        <p style="margin:0 0 2px 0; font-size:${republicFontSize}px; color:#1b3457; font-style:italic; font-weight:400;">Republic of the Philippines</p>
-        <h1 style="margin:0 0 2px 0; font-size:${departmentFontSize}px; line-height:1.1; color:#1b3457; font-family:'Old English Text MT','UnifrakturCook','UnifrakturMaguntia','MedievalSharp',serif; font-weight:700;">Department of Migrant Workers</h1>
-        <h2 style="margin:2px 0 3px 0; font-size:${officeFontSize}px; color:#1b3457; font-weight:700; letter-spacing:0.3px;">Regional Office - XIII (Caraga)</h2>
-        <p style="margin:0 0 5px 0; font-size:${addressFontSize}px; color:#555;">3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600</p>
+      <!-- Center text -->
+      <div style="flex:0 1 auto; text-align:center; padding:0 4px;">
+        <p style="margin:0 0 1px 0; font-size:${Math.round(11 * scale)}px; color:#2c4a7c; font-style:italic; font-weight:400;">Republic of the Philippines</p>
+        <p style="margin:0 0 1px 0; font-size:${Math.round(28 * scale)}px; line-height:1.05; color:#1b3457;
+                  font-family:'Old English Text MT','UnifrakturCook','UnifrakturMaguntia','MedievalSharp',serif;
+                  font-weight:700;">Department of Migrant Workers</p>
+        <p style="margin:0 0 1px 0; font-size:${Math.round(14 * scale)}px; color:#1b3457; font-weight:700;">Regional Office - XIII (Caraga)</p>
+        <p style="margin:0 0 4px 0; font-size:${Math.round(10 * scale)}px; color:#555; font-weight:400;">3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600</p>
         <p style="margin:0; font-size:${titleFontSize}px; color:#1b3457; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${title}</p>
+        ${subtitleHtml}
       </div>
 
       <!-- Right Logo (Bagong Pilipinas) -->
-      <div style="flex:0 0 ${rightLogoWidth}px; display:flex; align-items:center; justify-content:center;">
-        <img src="img/Bagong_Pilipinas_logo.png" style="width:${rightLogoWidth}px; height:${logoSize}px; object-fit:contain;" alt="Bagong Pilipinas Logo">
+      <div style="flex:0 0 ${rightLogoW}px; display:flex; align-items:center; justify-content:flex-start;">
+        <img src="img/Bagong_Pilipinas_logo.png" style="width:${rightLogoW}px; height:${logoSize}px; object-fit:contain; display:block;" alt="Bagong Pilipinas Logo">
       </div>
     </div>
   `;
@@ -1457,112 +1461,133 @@ async function exportTableToPdf(tableSelector, filename) {
 
     // ── Draw letterhead on every page ───────────────────────────────────────
     // If a month subtitle is present the header needs 5 mm extra to fit it.
-    const headerH = monitoringMonthSubtitle ? 36 : 30; // mm — must be >= logo height (22mm) + text rows
+    const headerH = monitoringMonthSubtitle ? 38 : 30; // mm
 
-    function drawHeader(doc, pageNum, totalPages) {
+    function drawHeader(doc, pageNum) {
+      const cx = pageW / 2;
       const y0 = margin;
 
-      // ── Logo sizing & vertical centering ──────────────────────────────────
-      const logoSize = 22;          // mm — DMW logo (square)
-      const logoY    = y0 + (headerH - logoSize) / 2;
+      // Logos: fixed smaller size, vertically centered within the header band.
+      const logoH = 18;  // mm — compact; was headerH-1 (29-35mm) which was too large
+      const logoTopOffset = (headerH - logoH) / 2;
 
-      // Left logo (DMW seal)
+      // Measure the widest text line so logos hug it rather than the page edge.
+      // "Department of Migrant Workers" at fontSize 13 is the widest line.
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      const widestLineW = doc.getTextWidth('Department of Migrant Workers');
+      const gap = 4; // mm — breathing room between logo edge and text
+
+      // Left logo (DMW seal — square): right edge sits just left of center text
       try {
         const leftImg = document.querySelector('img[alt="DMW Logo"]') ||
                         document.querySelector('img[src*="dmw_logo"]');
         if (leftImg && leftImg.complete) {
-          const canvas = document.createElement('canvas');
-          canvas.width  = leftImg.naturalWidth  || 80;
-          canvas.height = leftImg.naturalHeight || 80;
-          canvas.getContext('2d').drawImage(leftImg, 0, 0);
-          doc.addImage(canvas.toDataURL('image/png'), 'PNG', margin, logoY, logoSize, logoSize);
+          const c = document.createElement('canvas');
+          c.width = leftImg.naturalWidth || 100; c.height = leftImg.naturalHeight || 100;
+          c.getContext('2d').drawImage(leftImg, 0, 0);
+          const leftLogoX = cx - (widestLineW / 2) - gap - logoH;
+          doc.addImage(c.toDataURL('image/png'), 'PNG', leftLogoX, y0 + logoTopOffset, logoH, logoH);
         }
       } catch(_) {}
 
-      // Right logo (Bagong Pilipinas) — preserve aspect ratio
+      // Right logo (Bagong Pilipinas — wider, preserve aspect ratio):
+      // left edge sits just right of center text
       try {
         const rightImg = document.querySelector('img[alt="Bagong Pilipinas Logo"]') ||
                          document.querySelector('img[src*="Bagong_Pilipinas"]');
         if (rightImg && rightImg.complete) {
-          const canvas = document.createElement('canvas');
-          canvas.width  = rightImg.naturalWidth  || 110;
-          canvas.height = rightImg.naturalHeight || 80;
-          canvas.getContext('2d').drawImage(rightImg, 0, 0);
-          const aspect = (rightImg.naturalWidth || 110) / (rightImg.naturalHeight || 80);
-          const rW = logoSize * aspect;
-          doc.addImage(canvas.toDataURL('image/png'), 'PNG', pageW - margin - rW, logoY, rW, logoSize);
+          const c = document.createElement('canvas');
+          c.width = rightImg.naturalWidth || 220; c.height = rightImg.naturalHeight || 80;
+          c.getContext('2d').drawImage(rightImg, 0, 0);
+          const aspect = (rightImg.naturalWidth || 220) / (rightImg.naturalHeight || 80);
+          const rW = logoH * aspect;
+          const rightLogoX = cx + (widestLineW / 2) + gap;
+          doc.addImage(c.toDataURL('image/png'), 'PNG', rightLogoX, y0 + logoTopOffset, rW, logoH);
         }
       } catch(_) {}
 
-      // ── Center text block ─────────────────────────────────────────────────
-      const cx = pageW / 2;
+      // ── Center text block — cursor-based, tight line spacing ─────────────
+      let curY = y0 + 4;
 
-      // "Republic of the Philippines" — italic, dark navy
+      // "Republic of the Philippines" — small italic navy
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(7);
-      doc.setTextColor(27, 52, 87);
-      doc.text('Republic of the Philippines', cx, y0 + 5, { align: 'center' });
-
-      // "Department of Migrant Workers" — bold, large, dark navy
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.setTextColor(27, 52, 87);
-      doc.text('Department of Migrant Workers', cx, y0 + 11.5, { align: 'center' });
-
-      // "Regional Office - XIII (Caraga)" — bold, medium, dark navy
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(27, 52, 87);
-      doc.text('Regional Office - XIII (Caraga)', cx, y0 + 17, { align: 'center' });
-
-      // Address — normal, small, medium gray
-      doc.setFont('helvetica', 'normal');
       doc.setFontSize(6);
+      doc.setTextColor(44, 74, 124);
+      doc.text('Republic of the Philippines', cx, curY, { align: 'center' });
+      curY += 5;
+
+      // "Department of Migrant Workers" — bold, large (jsPDF has no blackletter;
+      // helvetica bold is the closest available)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(27, 52, 87);
+      doc.text('Department of Migrant Workers', cx, curY, { align: 'center' });
+      curY += 5.5;
+
+      // "Regional Office - XIII (Caraga)" — bold medium
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(27, 52, 87);
+      doc.text('Regional Office - XIII (Caraga)', cx, curY, { align: 'center' });
+      curY += 3.8;
+
+      // Address — small gray
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.5);
       doc.setTextColor(85, 85, 85);
       doc.text(
         '3rd Floor Esquina Dos Building, J.C. Aquino Avenue corner Doongan Road, Butuan City, Agusan del Norte, 8600',
-        cx, y0 + 21.5, { align: 'center' }
+        cx, curY, { align: 'center' }
       );
+      curY += 4.2;
 
-      // ── Document title — bold, dark navy, same color as header text ───────
+      // Document title — e.g. "2026 JOB FAIR MONITORING"
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(27, 52, 87);
-      doc.text(title, cx, y0 + 26, { align: 'center' });
+      doc.text(title, cx, curY, { align: 'center' });
+      curY += 4.5;
 
-      // Month subtitle (monitoring only, when a specific month is filtered)
+      // "FOR THE MONTH OF MARCH" — always rendered when a month filter is active,
+      // same bold style as the title so it reads as a second document title line
       if (monitoringMonthSubtitle) {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(7.5);
+        doc.setFontSize(9);
         doc.setTextColor(27, 52, 87);
-        doc.text(monitoringMonthSubtitle, cx, y0 + 31, { align: 'center' });
+        doc.text(monitoringMonthSubtitle, cx, curY, { align: 'center' });
       }
 
-      // ── Separator line (thick, dark navy — matches the reference image) ───
-      const sepY = monitoringMonthSubtitle ? y0 + 33.5 : y0 + 28.5;
-      doc.setDrawColor(27, 52, 87);
-      doc.setLineWidth(0.6);
+      // ── Separator: single thin line flush at the bottom of the header ─────
+      const sepY = y0 + headerH - 0.5;
+      doc.setDrawColor(176, 184, 200);   // matches the reference: light blue-gray
+      doc.setLineWidth(0.4);
       doc.line(margin, sepY, pageW - margin, sepY);
 
       // ── Footer ────────────────────────────────────────────────────────────
-      // Separator line
       doc.setDrawColor(200, 200, 200);
       doc.setLineWidth(0.3);
       doc.line(margin, pageH - 7, pageW - margin, pageH - 7);
 
-      // Footer center note
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(6.5);
       doc.setTextColor(150, 150, 150);
       doc.text('This document was automatically generated by the Job Fair Monitoring System', cx, pageH - 3.5, { align: 'center' });
 
-      // Page number (bottom right)
-      doc.setFontSize(7);
-      doc.text(`Page ${pageNum} of ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
+      // Page number drawn in the post-autoTable loop with the real total count.
     }
 
     // ── Clone & clean table ──────────────────────────────────────────────────
     const clonedTable = element.cloneNode(true);
+
+    // ── Convert checkboxes → ✓ / ✗ text BEFORE any text extraction ──────────
+    // <input type="checkbox"> has no textContent, so cellText() would produce
+    // a blank string. Replace every checkbox with a plain-text span first.
+    clonedTable.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
+      const span = document.createElement('span');
+      span.textContent = chk.checked ? '✓' : '-';
+      chk.replaceWith(span);
+    });
 
     // Convert evidence buttons to plain text
     if (isMonitoringExport) {
@@ -1710,7 +1735,7 @@ async function exportTableToPdf(tableSelector, filename) {
       showHead:    'everyPage',
       // Draw the letterhead on every page (including continuation pages)
       didDrawPage: (data) => {
-        drawHeader(doc, data.pageNumber, '{TOTAL}');
+        drawHeader(doc, data.pageNumber);
       },
     });
 
@@ -1728,7 +1753,7 @@ async function exportTableToPdf(tableSelector, filename) {
       let sigY = tableEndY + 8;
       if (sigY > availableY) {
         doc.addPage();
-        drawHeader(doc, doc.internal.getNumberOfPages(), '{TOTAL}');
+        drawHeader(doc, doc.internal.getNumberOfPages());
         sigY = margin + 28 + 8;   // below letterhead on the new page
       }
 
@@ -1777,15 +1802,21 @@ async function exportTableToPdf(tableSelector, filename) {
       doc.text('and OIC- Chief Labor and Employment Officer', rightX, titleY + 4.5);
     }
 
-    // ── Replace placeholder page-count ──────────────────────────────────────
-    // autoTable fires didDrawPage as pages are created; we don't know total until done.
-    // Patch all pages afterwards.
+    // ── Replace {TOTAL} placeholder with the real page count ─────────────────
+    // didDrawPage fires per page as the table is built, so we pass '{TOTAL}'
+    // as a placeholder. After autoTable finishes we know the real count, then
+    // we white-out the old text and redraw on every page.
     const totalPages = doc.internal.getNumberOfPages();
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p);
-      // White out the placeholder and redraw the correct count
+
+      // Erase the entire bottom-right area where the page number sits.
+      // Use a generously sized rect so the placeholder text is fully covered
+      // regardless of font metrics on the user's machine.
       doc.setFillColor(255, 255, 255);
-      doc.rect(pageW - margin - 28, pageH - 8, 30, 5, 'F');
+      doc.rect(pageW - margin - 40, pageH - 8.5, 42, 6, 'F');
+
+      // Redraw with the correct total
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(150, 150, 150);
