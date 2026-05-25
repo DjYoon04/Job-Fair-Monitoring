@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "dist": "electron-forge make",
+    "dist": "electron-builder",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:all": "electron-builder -mwl",
@@ -36,12 +36,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@electron-forge/cli": "^7.11.1",
-    "@electron-forge/maker-squirrel": "^7.11.1",
-    "@electron-forge/maker-zip": "^7.11.1",
     "electron": "^27.3.11",
-    "electron-builder": "^24.9.1",
-    "electron-reload": "^2.0.0-alpha.1"
+    "electron-builder": "^24.9.1"
   },
   "build": {
     "appId": "com.jobfair.monitoring",
@@ -51,6 +47,7 @@
       "preload.js",
       "ipc/**/*",
       "database/**/*",
+      "network/**/*",
       "src/**/*",
       "node_modules/**/*",
       ".env*"
@@ -62,7 +59,7 @@
     "publish": null,
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "icon": "src/img/dmw_logo.png",
       "signingHashAlgorithms": [
