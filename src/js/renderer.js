@@ -4919,7 +4919,6 @@ async function loadVenues() {
         <td>${v.venue_name}</td>
         <td>${v.city_municipality || '-'}</td>
         <td>${v.province || '-'}</td>
-        <td>${v.region || '-'}</td>
         <td class="actions-cell">
           ${canWrite
             ? `<button class="btn-icon btn-edit-venue" data-id="${v.id}" title="Edit"><i class="fas fa-edit"></i></button>
@@ -4927,7 +4926,7 @@ async function loadVenues() {
             : '<span style="color:var(--text-muted)">View only</span>'}
         </td>
       </tr>
-    `).join('') || '<tr><td colspan="6">No venues found</td></tr>';
+    `).join('') || '<tr><td colspan="5">No venues found</td></tr>';
 
     // Attach Venue event listeners
     document.querySelectorAll('.btn-edit-venue').forEach(btn => {
@@ -5093,7 +5092,6 @@ async function openVenueForm(id = null) {
       venue_name: venueName,
       city_municipality: cityMunicipality,
       province,
-      region: venue?.region || 'CARAGA',
     };
 
     try {
