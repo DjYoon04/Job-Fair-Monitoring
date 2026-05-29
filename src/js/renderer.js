@@ -1298,7 +1298,7 @@ function getMonitoringDateValue(value) {
 
 function createPdfHeader(title, subtitle = '', scale = 1) {
   const logoSize         = Math.round(60 * scale);   // reduced from 96 — compact seal size
-  const rightLogoW       = Math.round(85 * scale);   // reduced from 130 — proportional to seal
+  const rightLogoW       = Math.round(65 * scale);   // reduced for tighter Bagong Pilipinas logo width
   const titleFontSize    = Math.round(15 * scale);
   const subtitleFontSize = Math.round(13 * scale);
 
@@ -1536,7 +1536,7 @@ async function exportTableToPdf(tableSelector, filename) {
           c.width = rightImg.naturalWidth || 220; c.height = rightImg.naturalHeight || 80;
           c.getContext('2d').drawImage(rightImg, 0, 0);
           const aspect = (rightImg.naturalWidth || 220) / (rightImg.naturalHeight || 80);
-          const rW = logoH * aspect;
+          const rW = logoH * aspect * 0.82;
           const rightLogoX = cx + (widestLineW / 2) + gap;
           doc.addImage(c.toDataURL('image/png'), 'PNG', rightLogoX, y0 + logoTopOffset, rW, logoH);
         }
@@ -1689,9 +1689,15 @@ async function exportTableToPdf(tableSelector, filename) {
 
     // Build body rows
     const bodyRows = [];
-    clonedTable.querySelectorAll('tbody tr').forEach((tr, rowIdx) => {
+    const bodyRowElements = Array.from(clonedTable.querySelectorAll('tbody tr'));
+    if (isJfaSummaryExport || isJobFairSummaryExport) {
+      bodyRowElements.push(...Array.from(clonedTable.querySelectorAll('tfoot tr')));
+    }
+
+    bodyRowElements.forEach((tr, rowIdx) => {
       const isSubtotal   = tr.classList.contains('jf-subtotal-row') || tr.classList.contains('summary-subtotal-row');
-      const isGrandTotal = tr.classList.contains('jf-grand-total-row');
+      const isGrandTotal = tr.classList.contains('jf-grand-total-row')
+        || ((isJfaSummaryExport || isJobFairSummaryExport) && tr.closest('tfoot'));
       const rowCells     = Array.from(tr.querySelectorAll('td, th'));
 
       const cells = rowCells.map((cell, ci) => {
@@ -3356,21 +3362,17 @@ async function loadJobFairReport() {
   const yearSelect = document.getElementById('jfFilterYear');
   const monthSelect = document.getElementById('jfFilterMonth');
 
-  // Initialize filter defaults once so report opens on the current month/year.
+  // Initialize filter defaults once so report opens on the latest year and all months.
   if (yearSelect && monthSelect && yearSelect.dataset.currentDefaultSet !== 'true') {
-    const now = new Date();
-    const currentYear = String(now.getFullYear());
-    const currentMonth = String(now.getMonth() + 1);
+    const numericOptions = Array.from(yearSelect.options)
+      .map((option) => Number.parseInt(option.value, 10))
+      .filter((value) => Number.isFinite(value));
+    const latestYear = availableFiscalYears.length
+      ? Math.max(...availableFiscalYears)
+      : (numericOptions.length ? Math.max(...numericOptions) : new Date().getFullYear());
 
-    if (!yearSelect.querySelector(`option[value="${currentYear}"]`)) {
-      const option = document.createElement('option');
-      option.value = currentYear;
-      option.textContent = currentYear;
-      yearSelect.appendChild(option);
-    }
-
-    yearSelect.value = currentYear;
-    monthSelect.value = currentMonth;
+    setSelectValue(yearSelect, latestYear);
+    setSelectToAll(monthSelect, 'All Months');
     yearSelect.dataset.currentDefaultSet = 'true';
   }
 
