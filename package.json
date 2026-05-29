@@ -14,6 +14,7 @@
     "db:schema": "psql -U postgres -d job_fair_monitoring -f database/schema.sql",
     "db:seed": "node database/seed-from-excel.js",
     "db:setup": "npm run db:create && npm run db:schema && npm run db:seed",
+    "db:clear": "psql -U postgres -d job_fair_monitoring -f database/clear-data.sql",
     "db:reset": "psql -U postgres -c \"DROP DATABASE IF EXISTS job_fair_monitoring;\" && npm run db:setup"
   },
   "keywords": [
@@ -62,6 +63,7 @@
         "nsis"
       ],
       "icon": "src/img/dmw_logo.png",
+      "signAndEditExecutable": false,
       "signingHashAlgorithms": [
         "sha256"
       ],
